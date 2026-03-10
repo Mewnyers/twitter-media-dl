@@ -35,7 +35,7 @@ CONFIG_FILE = "config.yaml"
 DOWNLOADS_DIR = "downloads"
 
 DATE_PATTERN = "%Y%m%d%H%M"           # YYYYMMDDhhmm
-TWEET_CONTENT_MAX_LEN = 50            # ファイル名内のツイート本文の最大文字数
+TWEET_CONTENT_MAX_LEN = 200            # ファイル名内のツイート本文の最大文字数
 REQUEST_INTERVAL = 1.0                # ダウンロード間隔（秒）
 
 # Windowsで使えないファイル名文字
