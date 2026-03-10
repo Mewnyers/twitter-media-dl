@@ -234,9 +234,11 @@ def extract_media_items(tweets, include_retweets: bool) -> list[dict]:
     items = []
 
     for tweet in tweets:
-        # リツイート除外
-        if not include_retweets and tweet.is_retweet:
-            continue
+        # 他ユーザーのRTのみ除外（自己RTは常に通す）
+        if tweet.is_retweet:
+            is_self_retweet = tweet.retweeted_by == tweet.author.screen_name
+            if not is_self_retweet and not include_retweets:
+                continue
 
         if not tweet.media:
             continue
@@ -244,6 +246,9 @@ def extract_media_items(tweets, include_retweets: bool) -> list[dict]:
         author = tweet.author.screen_name
         created_at = tweet.created_at
         text = tweet.text
+
+        # RTプレフィックスを除去（"RT @username: " の形式）
+        text = re.sub(r"^RT @\w+: ", "", text)
 
         # t.co短縮リンクをテキストから除去
         text = re.sub(r"https://t\.co/\S+", "", text).strip()
