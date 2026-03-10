@@ -350,6 +350,8 @@ def main():
                         help="取得するツイートの最大件数（省略時は全件取得）")
     parser.add_argument("--include-retweets", action="store_true",
                         help="リツイートのメディアも含める（デフォルト: 除外）")
+    parser.add_argument("--debug", action="store_true",
+                        help="ツイートの生データをJSONに出力してデバッグ（ダウンロードは行わない）")
     args = parser.parse_args()
 
     username = args.username.lstrip("@")
@@ -376,6 +378,28 @@ def main():
     # ツイート取得
     tweets = fetch_all_tweets(username, args.max_count, auth_token, ct0)
     print(f"📊 取得ツイート数: {len(tweets)} 件")
+
+    # デバッグモード: 生データをJSONに出力して終了
+    if args.debug:
+        import json
+        debug_data = []
+        for t in tweets:
+            debug_data.append({
+                "id": t.id,
+                "text": t.text,
+                "author": t.author.screen_name,
+                "is_retweet": t.is_retweet,
+                "retweeted_by": t.retweeted_by,
+                "has_media": bool(t.media),
+                "media_count": len(t.media),
+                "has_quoted_tweet": t.quoted_tweet is not None,
+                "quoted_tweet_author": t.quoted_tweet.author.screen_name if t.quoted_tweet else None,
+                "quoted_tweet_has_media": bool(t.quoted_tweet and t.quoted_tweet.media),
+            })
+        out_path = Path(f"debug_{username}.json")
+        out_path.write_text(json.dumps(debug_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"📄 デバッグデータを出力しました: {out_path}")
+        return
 
     # メディア抽出
     items = extract_media_items(tweets, args.include_retweets)
