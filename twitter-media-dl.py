@@ -166,7 +166,7 @@ def fetch_all_tweets(username: str, max_count: int | None, auth_token: str, ct0:
     if max_count is not None:
         all_tweets = all_tweets[:max_count]
 
-    return all_tweets
+    return all_tweets, user
 
 
 # ────────────────────────────────────────────────────────────
@@ -374,14 +374,16 @@ def main():
         print("   config.yaml に auth_token と ct0 を記述するか、")
         print("   環境変数 TWITTER_AUTH_TOKEN / TWITTER_CT0 を設定してください。")
         sys.exit(1)
+    
+    # ツイート取得
+    tweets, user = fetch_all_tweets(username, args.max_count, auth_token, ct0)
 
     # 保存先ディレクトリを作成
-    output_dir = Path(DOWNLOADS_DIR) / f"@{username}"
+    folder_name = f"{user.name} (@{username})"
+    output_dir = Path(DOWNLOADS_DIR) / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    
     print(f"📁 保存先: {output_dir.resolve()}")
-
-    # ツイート取得
-    tweets = fetch_all_tweets(username, args.max_count, auth_token, ct0)
     print(f"📊 取得ツイート数: {len(tweets)} 件")
 
     # デバッグモード: 生データをJSONに出力して終了
