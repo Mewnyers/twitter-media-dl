@@ -206,6 +206,16 @@ def sanitize_filename(text: str) -> str:
     return text
 
 
+def anonymize_filename(filename: str) -> str:
+    """ファイル名のツイート本文部分をSHA256ハッシュの先頭8文字に置換する。"""
+    import hashlib
+    return re.sub(
+        r"(\[@[^\]]+\]\[\d{12}\] )(.+?)(_\d+)?(\.[^.]+)$",
+        lambda m: m.group(1) + hashlib.sha256(m.group(2).encode()).hexdigest()[:8] + (m.group(3) or "") + m.group(4),
+        filename
+    )
+
+
 def truncate_content(text: str, max_len: int = TWEET_CONTENT_MAX_LEN) -> str:
     """ツイート本文をmax_len文字に切り詰める。"""
     if len(text) <= max_len:
@@ -320,7 +330,7 @@ def download_file(url: str, dest_path: Path) -> bool:
         return False
 
 
-def download_all(items: list[dict], output_dir: Path):
+def download_all(items: list[dict], output_dir: Path, anonymize: bool = False):
     """全メディアをダウンロードする。"""
     total = len(items)
     skipped = 0
@@ -331,15 +341,16 @@ def download_all(items: list[dict], output_dir: Path):
         filename = item["filename"]
         url = item["url"]
         dest = output_dir / filename
+        display_name = anonymize_filename(filename) if anonymize else filename
 
         prefix = f"[{idx}/{total}]"
 
         if dest.exists():
-            print(f"{prefix} ⏭️  スキップ: {filename}")
+            print(f"{prefix} ⏭️  スキップ: {display_name}")
             skipped += 1
             continue
 
-        print(f"{prefix} ⬇️  {filename}")
+        print(f"{prefix} ⬇️  {display_name}")
         success = download_file(url, dest)
 
         if success:
@@ -369,6 +380,8 @@ def main():
                         help="リツイートのメディアも含める（デフォルト: 除外）")
     parser.add_argument("--full", action="store_true",
                         help="差分モードを無視して全件取得する")
+    parser.add_argument("--anonymize", action="store_true",
+                        help="デバッグ出力のツイート本文をハッシュ化する")
     parser.add_argument("--debug", action="store_true",
                         help="ツイートの生データをJSONに出力してデバッグ（ダウンロードは行わない）")
     args = parser.parse_args()
@@ -456,7 +469,7 @@ def main():
     print()
 
     # ダウンロード
-    download_all(items, output_dir)
+    download_all(items, output_dir, anonymize=args.anonymize)
 
 
 if __name__ == "__main__":
