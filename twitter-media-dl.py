@@ -84,7 +84,7 @@ BATCH_SIZE = 40        # 1リクエストあたりの取得件数
 REQUEST_DELAY = 3.5   # ページネーション間のウェイト（秒）
 
 
-def fetch_all_tweets(username: str, max_count: int | None, auth_token: str, ct0: str):
+def fetch_all_tweets(username: str, max_count: int | None, auth_token: str, ct0: str, since_dt: datetime | None = None):
     """
     twitter-cli の TwitterClient を直接使い、cursor ベースの
     ページネーションで全件（または max_count 件）取得する。
@@ -147,11 +147,23 @@ def fetch_all_tweets(username: str, max_count: int | None, auth_token: str, ct0:
         new_tweets, next_cursor = client._parse_timeline_response(data, get_instructions)
 
         added = 0
+        stop = False
         for tweet in new_tweets:
             if tweet.id and tweet.id not in seen_ids:
+                # RTでない通常ツイートのみ打ち切り判定に使う
+                if since_dt is not None and not tweet.is_retweet:
+                    try:
+                        tweet_dt = datetime.strptime(tweet.created_at, "%a %b %d %H:%M:%S %z %Y")
+                        if tweet_dt.replace(tzinfo=None) < since_dt:
+                            stop = True
+                            break
+                    except ValueError:
+                        pass
                 seen_ids.add(tweet.id)
                 all_tweets.append(tweet)
                 added += 1
+        if stop:
+            break
 
         page += 1
         print(f"   ページ {page}: {added} 件取得（累計 {len(all_tweets)} 件）")
@@ -355,6 +367,8 @@ def main():
                         help="取得するツイートの最大件数（省略時は全件取得）")
     parser.add_argument("--include-retweets", action="store_true",
                         help="リツイートのメディアも含める（デフォルト: 除外）")
+    parser.add_argument("--full", action="store_true",
+                        help="差分モードを無視して全件取得する")
     parser.add_argument("--debug", action="store_true",
                         help="ツイートの生データをJSONに出力してデバッグ（ダウンロードは行わない）")
     args = parser.parse_args()
@@ -375,8 +389,31 @@ def main():
         print("   環境変数 TWITTER_AUTH_TOKEN / TWITTER_CT0 を設定してください。")
         sys.exit(1)
     
+    # 差分モード: 既存フォルダのファイル名から最新日時を取得
+    since_dt = None
+    if not args.full:
+        dl_root = Path(DOWNLOADS_DIR)
+        # フォルダ名が "* (@username)" にマッチするものを探す
+        pattern = re.compile(r"\[(\d{12})\]")
+        candidates = []
+        for folder in dl_root.iterdir() if dl_root.exists() else []:
+            if folder.is_dir() and folder.name.endswith(f"(@{username})"):
+                for f in folder.iterdir():
+                    m = pattern.search(f.name)
+                    if m:
+                        try:
+                            candidates.append(datetime.strptime(m.group(1), "%Y%m%d%H%M"))
+                        except ValueError:
+                            pass
+        if candidates:
+            since_dt = max(candidates)
+            print(f"   候補フォルダ確認: {[f.name for f in dl_root.iterdir() if f.is_dir() and f.name.endswith(f'(@{username})')]}")
+            print(f"📅 差分モード: {since_dt.strftime('%Y/%m/%d %H:%M')} 以降を取得")
+        else:
+            print("📅 全件モード: 既存ファイルが見つからないため全件取得")
+
     # ツイート取得
-    tweets, user = fetch_all_tweets(username, args.max_count, auth_token, ct0)
+    tweets, user = fetch_all_tweets(username, args.max_count, auth_token, ct0, since_dt)
 
     # 保存先ディレクトリを作成
     folder_name = f"{user.name} (@{username})"
