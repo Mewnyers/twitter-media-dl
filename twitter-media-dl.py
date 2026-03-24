@@ -103,7 +103,7 @@ def fetch_all_tweets_by_UserTweets(username: str, max_count: int | None, auth_to
     )
 
     # ユーザーID取得
-    print(f"👤 @{username} のプロフィールを取得中...")
+    print(f"👤 @{username} のプロフィールを取得中...(UserTweets)")
     try:
         user = client.fetch_user(username)
     except Exception as e:
@@ -187,7 +187,7 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
     返信ツイートのメディアも含む。
     """
     try:
-        from twitter_cli.client import TwitterClient, FEATURES, _deep_get, FALLBACK_QUERY_IDS
+        from twitter_cli.client import TwitterClient, FEATURES, _deep_get, FALLBACK_QUERY_IDS, _extract_cursor
         if "UserMedia" not in FALLBACK_QUERY_IDS:
             FALLBACK_QUERY_IDS["UserMedia"] = "U1Zgdsu2qjBi8JF74lTmJQ"
     except ImportError:
@@ -201,7 +201,7 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
     )
 
     # ユーザーID取得
-    print(f"👤 @{username} のプロフィールを取得中...")
+    print(f"👤 @{username} のプロフィールを取得中...(UserMedia)")
     try:
         user = client.fetch_user(username)
     except Exception as e:
@@ -219,6 +219,33 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
     def get_instructions(data):
         return _deep_get(data, "data", "user", "result", "timeline", "timeline", "instructions")
 
+    def parse_usermedia_response(data):
+        """UserMedia専用パーサー。ページ1とページ2以降で構造が異なるため独自実装。"""
+        tweets = []
+        next_cursor = None
+        instructions = get_instructions(data)
+        if not instructions:
+            return tweets, next_cursor
+        for instruction in instructions:
+            # ページ1: entries の中に items がある構造
+            for entry in instruction.get("entries", []):
+                content = entry.get("content", {})
+                next_cursor = _extract_cursor(content) or next_cursor
+                for nested_item in content.get("items", []):
+                    result = _deep_get(nested_item, "item", "itemContent", "tweet_results", "result")
+                    if result:
+                        tweet = client._parse_tweet_result(result)
+                        if tweet:
+                            tweets.append(tweet)
+            # ページ2以降: moduleItems が直接ある構造
+            for module_item in instruction.get("moduleItems", []):
+                result = _deep_get(module_item, "item", "itemContent", "tweet_results", "result")
+                if result:
+                    tweet = client._parse_tweet_result(result)
+                    if tweet:
+                        tweets.append(tweet)
+        return tweets, next_cursor
+    
     print("📡 ツイートを取得中...")
 
     while True:
@@ -242,8 +269,8 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
             print(f"   ⚠️  APIエラー（ページ{page+1}）: {e}")
             break
 
-        new_tweets, next_cursor = client._parse_timeline_response(data, get_instructions)
-
+        new_tweets, next_cursor = parse_usermedia_response(data)
+        
         added = 0
         stop = False
         for tweet in new_tweets:
