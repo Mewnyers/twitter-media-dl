@@ -84,7 +84,7 @@ BATCH_SIZE = 40        # 1リクエストあたりの取得件数
 REQUEST_DELAY = 3.5   # ページネーション間のウェイト（秒）
 
 
-def fetch_all_tweets(username: str, max_count: int | None, auth_token: str, ct0: str, since_dt: datetime | None = None):
+def fetch_all_tweets_by_UserTweets(username: str, max_count: int | None, auth_token: str, ct0: str, since_dt: datetime | None = None):
     """
     twitter-cli の TwitterClient を直接使い、cursor ベースの
     ページネーションで全件（または max_count 件）取得する。
@@ -169,6 +169,103 @@ def fetch_all_tweets(username: str, max_count: int | None, auth_token: str, ct0:
         print(f"   ページ {page}: {added} 件取得（累計 {len(all_tweets)} 件）")
 
         # 終了条件: 新規ツイートなし、またはcursorが尽きた
+        if not next_cursor or added == 0:
+            break
+
+        cursor = next_cursor
+        time.sleep(REQUEST_DELAY)
+
+    if max_count is not None:
+        all_tweets = all_tweets[:max_count]
+
+    return all_tweets, user
+
+
+def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_token: str, ct0: str, since_dt: datetime | None = None):
+    """
+    UserMedia エンドポイントを使いメディア付きツイートを取得する。
+    返信ツイートのメディアも含む。
+    """
+    try:
+        from twitter_cli.client import TwitterClient, FEATURES, _deep_get, FALLBACK_QUERY_IDS
+        if "UserMedia" not in FALLBACK_QUERY_IDS:
+            FALLBACK_QUERY_IDS["UserMedia"] = "U1Zgdsu2qjBi8JF74lTmJQ"
+    except ImportError:
+        print("❌ twitter-cli が見つかりません。`pip install twitter-cli` でインストールしてください。")
+        sys.exit(1)
+
+    client = TwitterClient(
+        auth_token=auth_token,
+        ct0=ct0,
+        rate_limit_config={"requestDelay": REQUEST_DELAY, "maxRetries": 3, "maxCount": 200},
+    )
+
+    # ユーザーID取得
+    print(f"👤 @{username} のプロフィールを取得中...")
+    try:
+        user = client.fetch_user(username)
+    except Exception as e:
+        print(f"❌ ユーザー取得失敗: {e}")
+        sys.exit(1)
+    user_id = user.id
+    print(f"   ID: {user_id}  ツイート数: {user.tweets_count:,}")
+
+    # ページネーションループ
+    all_tweets = []
+    seen_ids = set()
+    cursor = None
+    page = 0
+
+    def get_instructions(data):
+        return _deep_get(data, "data", "user", "result", "timeline", "timeline", "instructions")
+
+    print("📡 ツイートを取得中...")
+
+    while True:
+        if max_count is not None and len(all_tweets) >= max_count:
+            break
+
+        variables = {
+            "userId": user_id,
+            "count": BATCH_SIZE,
+            "includePromotedContent": False,
+            "withClientEventToken": False,
+            "withBirdwatchNotes": False,
+            "withVoice": True,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+
+        try:
+            data = client._graphql_get("UserMedia", variables, FEATURES)
+        except Exception as e:
+            print(f"   ⚠️  APIエラー（ページ{page+1}）: {e}")
+            break
+
+        new_tweets, next_cursor = client._parse_timeline_response(data, get_instructions)
+
+        added = 0
+        stop = False
+        for tweet in new_tweets:
+            if tweet.id and tweet.id not in seen_ids:
+                # RTでない通常ツイートのみ打ち切り判定に使う
+                if since_dt is not None and not tweet.is_retweet:
+                    try:
+                        tweet_dt = datetime.strptime(tweet.created_at, "%a %b %d %H:%M:%S %z %Y")
+                        if tweet_dt.replace(tzinfo=None) < since_dt:
+                            stop = True
+                            break
+                    except ValueError:
+                        pass
+                seen_ids.add(tweet.id)
+                all_tweets.append(tweet)
+                added += 1
+        if stop:
+            break
+
+        page += 1
+        print(f"   ページ {page}: {added} 件取得（累計 {len(all_tweets)} 件）")
+
         if not next_cursor or added == 0:
             break
 
@@ -426,7 +523,7 @@ def main():
             print("📅 全件モード: 既存ファイルが見つからないため全件取得")
 
     # ツイート取得
-    tweets, user = fetch_all_tweets(username, args.max_count, auth_token, ct0, since_dt)
+    tweets, user = fetch_all_tweets_by_UserMedia(username, args.max_count, auth_token, ct0, since_dt)
 
     # 保存先ディレクトリを作成
     folder_name = f"{user.name} (@{username})"
