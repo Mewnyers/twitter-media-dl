@@ -441,9 +441,11 @@ def main():
         import json
         debug_data = []
         for t in tweets:
+            import hashlib
+            text_display = hashlib.sha256(t.text.encode()).hexdigest()[:8] if args.anonymize else t.text
             debug_data.append({
                 "id": t.id,
-                "text": t.text,
+                "text": text_display,
                 "author": t.author.screen_name,
                 "is_retweet": t.is_retweet,
                 "retweeted_by": t.retweeted_by,
@@ -453,7 +455,7 @@ def main():
                 "quoted_tweet_author": t.quoted_tweet.author.screen_name if t.quoted_tweet else None,
                 "quoted_tweet_has_media": bool(t.quoted_tweet and t.quoted_tweet.media),
             })
-        out_path = Path(f"debug_{username}.json")
+        out_path = Path(f"debug_{username}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
         out_path.write_text(json.dumps(debug_data, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"📄 デバッグデータを出力しました: {out_path}")
         return
