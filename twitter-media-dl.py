@@ -37,6 +37,7 @@ DOWNLOADS_DIR = "downloads"
 DATE_PATTERN = "%Y%m%d%H%M"           # YYYYMMDDhhmm
 TWEET_CONTENT_MAX_LEN = 200            # ファイル名内のツイート本文の最大文字数
 REQUEST_INTERVAL = 1.0                # ダウンロード間隔（秒）
+TIMEZONE_OFFSET_HOURS = 9  # 0=UTC, 9=JST
 
 # Windowsで使えないファイル名文字
 INVALID_CHARS_RE = re.compile(r'[\\/:*?"<>|\r\n\t]')
@@ -310,11 +311,10 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
 # ────────────────────────────────────────────────────────────
 
 def parse_twitter_date(date_str: str) -> str:
-    """
-    "Mon Mar 09 23:53:51 +0000 2026" → "202603092353"
-    """
     try:
+        from datetime import timezone, timedelta
         dt = datetime.strptime(date_str, "%a %b %d %H:%M:%S %z %Y")
+        dt = dt.astimezone(timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS)))
         return dt.strftime(DATE_PATTERN)
     except ValueError:
         # パース失敗時はそのまま返す
