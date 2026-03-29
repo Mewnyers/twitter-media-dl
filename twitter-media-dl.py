@@ -93,7 +93,7 @@ def fetch_all_tweets_by_UserTweets(username: str, max_count: int | None, auth_to
     """
     try:
         from twitter_cli.client import TwitterClient, FEATURES
-        from twitter_cli.parser import _deep_get
+        from twitter_cli.parser import _deep_get, parse_timeline_response
     except ImportError:
         print("❌ twitter-cli が見つかりません。`pip install twitter-cli` でインストールしてください。")
         sys.exit(1)
@@ -146,7 +146,7 @@ def fetch_all_tweets_by_UserTweets(username: str, max_count: int | None, auth_to
             print(f"   ⚠️  APIエラー（ページ{page+1}）: {e}")
             break
 
-        new_tweets, next_cursor = client._parse_timeline_response(data, get_instructions)
+        new_tweets, next_cursor = parse_timeline_response(data, get_instructions)
 
         added = 0
         stop = False
@@ -553,7 +553,20 @@ def main():
             print("📅 全件モード: 既存ファイルが見つからないため全件取得")
 
     # ツイート取得
-    tweets, user = fetch_all_tweets_by_UserMedia(username, args.max_count, auth_token, ct0, since_dt)
+    if since_dt is None:
+        # 初回: UserTweets（全件）→ UserMedia（全件）で完全取得
+        tweets_usertweets, user = fetch_all_tweets_by_UserTweets(username, args.max_count, auth_token, ct0)
+        tweets_usermedia, _ = fetch_all_tweets_by_UserMedia(username, args.max_count, auth_token, ct0)
+        # 重複除去して合算
+        seen_ids = {t.id for t in tweets_usertweets}
+        for tweet in tweets_usermedia:
+            if tweet.id not in seen_ids:
+                tweets_usertweets.append(tweet)
+                seen_ids.add(tweet.id)
+        tweets = tweets_usertweets
+    else:
+        # 2回目以降: UserMedia（差分）のみ
+        tweets, user = fetch_all_tweets_by_UserMedia(username, args.max_count, auth_token, ct0, since_dt)
 
     # 保存先ディレクトリを作成
     today = datetime.now().strftime("%Y%m%d")
