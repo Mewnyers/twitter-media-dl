@@ -537,7 +537,7 @@ def main():
         pattern = re.compile(r"\[(\d{12})\]")
         candidates = []
         for folder in dl_root.iterdir() if dl_root.exists() else []:
-            if folder.is_dir() and folder.name.endswith(f"(@{username})"):
+            if folder.is_dir() and f"(@{username})" in folder.name:
                 for f in folder.iterdir():
                     m = pattern.search(f.name)
                     if m:
@@ -556,7 +556,8 @@ def main():
     tweets, user = fetch_all_tweets_by_UserMedia(username, args.max_count, auth_token, ct0, since_dt)
 
     # 保存先ディレクトリを作成
-    folder_name = f"{user.name} (@{username})"
+    today = datetime.now().strftime("%Y%m%d")
+    folder_name = sanitize_filename(f"{user.name} (@{username})") + f" [{today}]"
     output_dir = Path(DOWNLOADS_DIR) / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
