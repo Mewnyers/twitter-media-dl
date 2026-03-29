@@ -92,7 +92,8 @@ def fetch_all_tweets_by_UserTweets(username: str, max_count: int | None, auth_to
     Tweet オブジェクトのリストを返す。
     """
     try:
-        from twitter_cli.client import TwitterClient, FEATURES, _deep_get
+        from twitter_cli.client import TwitterClient, FEATURES
+        from twitter_cli.parser import _deep_get
     except ImportError:
         print("❌ twitter-cli が見つかりません。`pip install twitter-cli` でインストールしてください。")
         sys.exit(1)
@@ -188,7 +189,9 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
     返信ツイートのメディアも含む。
     """
     try:
-        from twitter_cli.client import TwitterClient, FEATURES, _deep_get, FALLBACK_QUERY_IDS, _extract_cursor
+        from twitter_cli.client import TwitterClient, FEATURES
+        from twitter_cli.parser import _deep_get, _extract_cursor, parse_tweet_result
+        from twitter_cli.graphql import FALLBACK_QUERY_IDS
         if "UserMedia" not in FALLBACK_QUERY_IDS:
             FALLBACK_QUERY_IDS["UserMedia"] = "U1Zgdsu2qjBi8JF74lTmJQ"
     except ImportError:
@@ -235,14 +238,14 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
                 for nested_item in content.get("items", []):
                     result = _deep_get(nested_item, "item", "itemContent", "tweet_results", "result")
                     if result:
-                        tweet = client._parse_tweet_result(result)
+                        tweet = parse_tweet_result(result)
                         if tweet:
                             tweets.append(tweet)
             # ページ2以降: moduleItems が直接ある構造
             for module_item in instruction.get("moduleItems", []):
                 result = _deep_get(module_item, "item", "itemContent", "tweet_results", "result")
                 if result:
-                    tweet = client._parse_tweet_result(result)
+                    tweet = parse_tweet_result(result)
                     if tweet:
                         tweets.append(tweet)
         return tweets, next_cursor
