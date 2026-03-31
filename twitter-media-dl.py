@@ -568,11 +568,26 @@ def main():
         # 2回目以降: UserMedia（差分）のみ
         tweets, user = fetch_all_tweets_by_UserMedia(username, args.max_count, auth_token, ct0, since_dt)
 
-    # 保存先ディレクトリを作成
+    # 保存先ディレクトリを作成（既存フォルダがあればリネームして使用）
     today = datetime.now().strftime("%Y%m%d")
-    folder_name = sanitize_filename(f"{user.name} (@{username})") + f" [{today}]"
-    output_dir = Path(DOWNLOADS_DIR) / folder_name
-    output_dir.mkdir(parents=True, exist_ok=True)
+    base_name = sanitize_filename(f"{user.name} (@{username})")
+    new_folder_name = f"{base_name} [{today}]"
+    new_output_dir = Path(DOWNLOADS_DIR) / new_folder_name
+
+    # 既存フォルダを探してリネーム
+    dl_root = Path(DOWNLOADS_DIR)
+    existing_dir = None
+    if dl_root.exists():
+        for folder in dl_root.iterdir():
+            if folder.is_dir() and f"(@{username})" in folder.name:
+                existing_dir = folder
+                break
+
+    if existing_dir and existing_dir != new_output_dir:
+        existing_dir.rename(new_output_dir)
+    
+    new_output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = new_output_dir
     
     print(f"📁 保存先: {output_dir.resolve()}")
     print(f"📊 取得ツイート数: {len(tweets)} 件")
