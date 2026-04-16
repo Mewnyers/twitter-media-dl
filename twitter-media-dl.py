@@ -34,7 +34,7 @@ from pathlib import Path
 CONFIG_FILE = "config.yaml"
 DOWNLOADS_DIR = "downloads"
 
-DATE_PATTERN = "%Y%m%d%H%M"           # YYYYMMDDhhmm
+DATE_PATTERN = "%Y%m%d%H%M%S"           # YYYYMMDDhhmmss
 TWEET_CONTENT_MAX_LEN = 200            # ファイル名内のツイート本文の最大文字数
 REQUEST_INTERVAL = 1.0                # ダウンロード間隔（秒）
 TIMEZONE_OFFSET_HOURS = 9  # 0=UTC, 9=JST
