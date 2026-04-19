@@ -537,7 +537,7 @@ def main():
     if not args.full:
         dl_root = Path(DOWNLOADS_DIR)
         # フォルダ名が "* (@username)" にマッチするものを探す
-        pattern = re.compile(r"\[(\d{12})\]")
+        pattern = re.compile(r"\[(\d{14})\]")
         candidates = []
         for folder in dl_root.iterdir() if dl_root.exists() else []:
             if folder.is_dir() and f"(@{username})" in folder.name:
@@ -545,7 +545,7 @@ def main():
                     m = pattern.search(f.name)
                     if m:
                         try:
-                            candidates.append(datetime.strptime(m.group(1), "%Y%m%d%H%M"))
+                            candidates.append(datetime.strptime(m.group(1), "%Y%m%d%H%M%S"))
                         except ValueError:
                             pass
         if candidates:
