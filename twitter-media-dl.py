@@ -511,6 +511,9 @@ def main():
                         help="デバッグ出力のツイート本文をハッシュ化する")
     parser.add_argument("--debug", action="store_true",
                         help="ツイートの生データをJSONに出力してデバッグ（ダウンロードは行わない）")
+    if len(sys.argv) == 1:
+        user_input = input("input UserID: ").strip()
+        sys.argv.extend(user_input.split())
     args = parser.parse_args()
 
     username = args.username.lstrip("@")
@@ -632,3 +635,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    input("\nPress Enter to exit...")
