@@ -36,7 +36,7 @@ DOWNLOADS_DIR = "downloads"
 
 DATE_PATTERN = "%Y%m%d%H%M%S"           # YYYYMMDDhhmmss
 TWEET_CONTENT_MAX_LEN = 200            # ファイル名内のツイート本文の最大文字数
-REQUEST_INTERVAL = 1.0                # ダウンロード間隔（秒）
+REQUEST_INTERVAL = 0.5                # ダウンロード間隔（秒）
 TIMEZONE_OFFSET_HOURS = 9  # 0=UTC, 9=JST
 
 # Windowsで使えないファイル名文字
@@ -82,7 +82,7 @@ def load_config() -> dict:
 # ────────────────────────────────────────────────────────────
 
 BATCH_SIZE = 40        # 1リクエストあたりの取得件数
-REQUEST_DELAY = 3.5   # ページネーション間のウェイト（秒）
+REQUEST_DELAY = 1.5   # ページネーション間のウェイト（秒）
 
 
 def fetch_all_tweets_by_UserTweets(username: str, max_count: int | None, auth_token: str, ct0: str, since_dt: datetime | None = None):
