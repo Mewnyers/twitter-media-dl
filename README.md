@@ -1,118 +1,118 @@
 # twitter-media-dl
 
-Twitter/X の指定ユーザーのメディア（画像・動画）を一括ダウンロードするPythonスクリプト。
+A Python script to bulk download media (images and videos) from a specified Twitter/X user.
 
-## 特徴
+## Features
 
-- ユーザーの全ツイートからメディアを漏れなく取得（件数上限なし）
-- 画像はオリジナル画質で保存
-- 動画（mp4）にも対応
-- リツイートのメディアは除外（オプションで含めることも可）
-- 既にダウンロード済みのファイルはスキップするため、途中から再開可能
-- ファイル名に投稿者・日時・ツイート本文を含む形式で保存
+- Fetches all media from a user's tweets without any count limit
+- Saves images in original quality
+- Supports videos (mp4)
+- Excludes media from retweets (can be included via option)
+- Skips already-downloaded files, allowing resumable downloads
+- Saves files with filenames containing the author, timestamp, and tweet text
 
-## ファイル名形式
+## Filename Format
 
 ```
 [@author][YYYYMMDDhhmm] tweetContent{index}.ext
 ```
 
-例:
+Examples:
 ```
 [@elonmusk][202603092353] Real picture of @StarbaseTX.jpg
 [@elonmusk][202603092353] Multiple images tweet_1.jpg
 [@elonmusk][202603092353] Multiple images tweet_2.jpg
-[@elonmusk][202603091823] .mp4   ← テキストなしの場合は空文字
+[@elonmusk][202603091823] .mp4   ← empty string when tweet has no text
 ```
 
-## 保存先
+## Save Location
 
 ```
 ./downloads/@<username>/
 ```
 
-例: `@elonmusk` を指定した場合 → `./downloads/@elonmusk/`
+Example: specifying `@elonmusk` → `./downloads/@elonmusk/`
 
-## 必要なもの
+## Requirements
 
-- Python 3.10 以上
+- Python 3.10 or higher
 - [twitter-cli](https://github.com/jackwener/twitter-cli)
 
 ```bash
 pip install twitter-cli
 ```
 
-## セットアップ
+## Setup
 
-### 1. スクリプトの配置
+### 1. Place the Script
 
-`twitter-media-dl.py` と `config.yaml` を同じフォルダに置く。
+Put `twitter-media-dl.py` and `config.yaml` in the same folder.
 
-### 2. 認証情報の設定
+### 2. Configure Credentials
 
-x.com にログイン済みのブラウザで開発者ツールを開き、以下の Cookie の値をコピーする。
+Open the developer tools in a browser where you are logged in to x.com, and copy the values of the following cookies:
 
 - `auth_token`
 - `ct0`
 
-`config.yaml` に記入する:
+Enter them in `config.yaml`:
 
 ```yaml
 auth:
-  auth_token: "ここにauth_tokenの値を貼る"
-  ct0: "ここにct0の値を貼る"
+  auth_token: "paste your auth_token value here"
+  ct0: "paste your ct0 value here"
 ```
 
-または環境変数でも指定できる:
+You can also specify them via environment variables:
 
 ```cmd
 set TWITTER_AUTH_TOKEN=your_auth_token
 set TWITTER_CT0=your_ct0
 ```
 
-> ⚠️ `auth_token` はログインと同等の情報です。他人に共有しないでください。
+> ⚠️ `auth_token` is equivalent to your login credentials. Do not share it with anyone.
 
-## 使い方
+## Usage
 
 ```bash
-# 全件取得
+# Fetch all media
 python twitter-media-dl.py <username>
 
-# 件数を指定して取得
+# Fetch up to a specified count
 python twitter-media-dl.py <username> --max 100
 
-# リツイートのメディアも含める
+# Include media from retweets
 python twitter-media-dl.py <username> --include-retweets
 ```
 
-### 実行例
+### Example Output
 
 ```
-📁 保存先: C:\twitter\downloads\@elonmusk
-👤 @elonmusk のプロフィールを取得中...
-   ID: 44196397  ツイート数: 98,782
-📡 ツイートを取得中...
-   ページ 1: 21 件取得（累計 21 件）
-   ページ 2: 20 件取得（累計 41 件）
+📁 Save location: C:\twitter\downloads\@elonmusk
+👤 Fetching profile for @elonmusk...
+   ID: 44196397  Tweets: 98,782
+📡 Fetching tweets...
+   Page 1: 21 fetched (total 21)
+   Page 2: 20 fetched (total 41)
    ...
-📊 取得ツイート数: 100 件
-🖼️  メディア数: 12 件（リツイート除外）
+📊 Tweets fetched: 100
+🖼️  Media count: 12 (retweets excluded)
 
 [1/12] ⬇️  [@elonmusk][202603092353] Real picture of @StarbaseTX.jpg
-[2/12] ⏭️  スキップ: すでに存在するファイル
+[2/12] ⏭️  Skipped: file already exists
 ...
 ────────────────────────────────────────────────────────────
-✅ 完了: 11 件ダウンロード / 1 件スキップ / 0 件失敗
+✅ Done: 11 downloaded / 1 skipped / 0 failed
 ```
 
-## 注意事項
+## Notes
 
-- Cookie 認証を使用するため、x.com への影響を最小化するためリクエスト間に 4 秒のウェイトを設けています
-- Twitter 側の仕様変更により動作しなくなった場合は `pip install --upgrade twitter-cli` でアップデートを試してください
-- Cookie の有効期限が切れた場合はブラウザで再ログインし、`config.yaml` の値を更新してください
+- Cookie-based authentication is used; a 4-second delay between requests is in place to minimize impact on x.com.
+- If the script stops working due to Twitter API changes, try updating with `pip install --upgrade twitter-cli`.
+- If your cookies expire, re-login in the browser and update the values in `config.yaml`.
 
-## 依存関係
+## Dependencies
 
-| パッケージ | 用途 |
+| Package | Purpose |
 |---|---|
-| twitter-cli | Twitter GraphQL API の認証・通信・レスポンスパース |
+| twitter-cli | Authentication, communication, and response parsing for the Twitter GraphQL API |
