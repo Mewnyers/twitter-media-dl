@@ -156,7 +156,7 @@ def fetch_all_tweets_by_UserTweets(username: str, max_count: int | None, auth_to
                 if since_dt is not None and not tweet.is_retweet:
                     try:
                         tweet_dt = datetime.strptime(tweet.created_at, "%a %b %d %H:%M:%S %z %Y")
-                        if tweet_dt.replace(tzinfo=None) < since_dt:
+                        if tweet_dt < since_dt:
                             stop = True
                             break
                     except ValueError:
@@ -283,7 +283,7 @@ def fetch_all_tweets_by_UserMedia(username: str, max_count: int | None, auth_tok
                 if since_dt is not None and not tweet.is_retweet:
                     try:
                         tweet_dt = datetime.strptime(tweet.created_at, "%a %b %d %H:%M:%S %z %Y")
-                        if tweet_dt.replace(tzinfo=None) < since_dt:
+                        if tweet_dt < since_dt:
                             stop = True
                             break
                     except ValueError:
@@ -545,7 +545,10 @@ def main():
                     m = pattern.search(f.name)
                     if m:
                         try:
-                            candidates.append(datetime.strptime(m.group(1), "%Y%m%d%H%M%S"))
+                            from datetime import timezone, timedelta
+                            dt_naive = datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
+                            dt_aware = dt_naive.replace(tzinfo=timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS)))
+                            candidates.append(dt_aware)
                         except ValueError:
                             pass
         if candidates:
