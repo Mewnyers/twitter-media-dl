@@ -75,9 +75,10 @@ If a matching folder for the same username already exists, it is renamed to the 
 
 - Python 3.10 or higher
 - [twitter-cli](https://github.com/jackwener/twitter-cli)
+- [certifi](https://pypi.org/project/certifi/)
 
 ```bash
-pip install twitter-cli
+pip install -r requirements.txt
 ```
 
 `PyYAML` is optional. If it is not installed, the script uses a small fallback parser for the `auth` section of `config.yaml`.
@@ -174,6 +175,7 @@ Use `--full` to ignore this behavior and fetch from the beginning.
 - Cookie-based authentication is used.
 - Pagination requests wait 1.5 seconds between pages.
 - Media downloads wait 0.5 seconds between files.
+- HTTPS media downloads use `certifi`'s CA bundle when available.
 - If the script stops working due to Twitter/X API changes, try updating with `pip install --upgrade twitter-cli`.
 - If your cookies expire, re-login in the browser and update `config.yaml` or the environment variables.
 
@@ -182,3 +184,4 @@ Use `--full` to ignore this behavior and fetch from the beginning.
 | Package | Purpose |
 |---|---|
 | twitter-cli | Authentication, communication, and response parsing for the Twitter GraphQL API |
+| certifi | CA certificate bundle for HTTPS media downloads |
