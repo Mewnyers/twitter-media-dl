@@ -1,3 +1,4 @@
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -5,6 +6,16 @@ from pathlib import Path
 
 from .filename import anonymize_filename
 from .settings import REQUEST_INTERVAL
+
+
+def create_ssl_context():
+    """certifi が利用できる場合は、更新されたCAバンドルをHTTPS検証に使う。"""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def download_file(url: str, dest_path: Path) -> bool:
@@ -18,12 +29,17 @@ def download_file(url: str, dest_path: Path) -> bool:
     }
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=30, context=create_ssl_context()) as response:
             data = response.read()
         dest_path.write_bytes(data)
         return True
     except urllib.error.HTTPError as e:
         print(f"    ⚠️  HTTP {e.code}: {url}")
+        return False
+    except urllib.error.URLError as e:
+        print(f"    ⚠️  ダウンロード失敗: {e}")
+        if isinstance(e.reason, ssl.SSLError):
+            print("       HTTPS証明書エラーです。`pip install -r requirements.txt` で certifi を導入してください。")
         return False
     except Exception as e:
         print(f"    ⚠️  ダウンロード失敗: {e}")
@@ -63,4 +79,3 @@ def download_all(items: list[dict], output_dir: Path, anonymize: bool = False):
     print()
     print("─" * 60)
     print(f"✅ 完了: {downloaded} 件ダウンロード / {skipped} 件スキップ / {failed} 件失敗")
-

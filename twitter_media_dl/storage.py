@@ -12,9 +12,11 @@ def find_since_datetime(username: str, downloads_dir: str = DOWNLOADS_DIR):
     # ファイル名に含まれる [YYYYMMDDhhmmss] を既存ダウンロード日時として扱う
     pattern = re.compile(r"\[(\d{14})\]")
     candidates = []
+    matched_folders = []
 
     for folder in dl_root.iterdir() if dl_root.exists() else []:
         if folder.is_dir() and f"(@{username})" in folder.name:
+            matched_folders.append(folder.name)
             for f in folder.iterdir():
                 m = pattern.search(f.name)
                 if m:
@@ -28,7 +30,7 @@ def find_since_datetime(username: str, downloads_dir: str = DOWNLOADS_DIR):
     if not candidates:
         return None
 
-    print(f"   候補フォルダ確認: {[f.name for f in dl_root.iterdir() if f.is_dir() and f.name.endswith(f'(@{username})')]}")
+    print(f"   候補フォルダ確認: {matched_folders}")
     return max(candidates)
 
 
