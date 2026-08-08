@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import ssl
 import time
 import urllib.error
@@ -6,6 +7,14 @@ from pathlib import Path
 
 from .filename import anonymize_filename
 from .settings import REQUEST_INTERVAL
+
+
+@dataclass
+class DownloadSummary:
+    downloaded: int
+    skipped: int
+    failed: int
+    watermark: str | None
 
 
 def create_ssl_context():
@@ -46,12 +55,19 @@ def download_file(url: str, dest_path: Path) -> bool:
         return False
 
 
-def download_all(items: list[dict], output_dir: Path, anonymize: bool = False):
+def get_item_watermark(item: dict) -> str | None:
+    """watermark更新に使うメディア日時を返す。"""
+    return item.get("created_at_sort")
+
+
+def download_all(items: list[dict], output_dir: Path, initial_watermark: str | None = None, anonymize: bool = False):
     """全メディアをダウンロードする。"""
     total = len(items)
     skipped = 0
     downloaded = 0
     failed = 0
+    watermark = initial_watermark
+    blocked_by_failure = False
 
     for idx, item in enumerate(items, start=1):
         filename = item["filename"]
@@ -64,6 +80,8 @@ def download_all(items: list[dict], output_dir: Path, anonymize: bool = False):
         if dest.exists():
             print(f"{prefix} ⏭️  スキップ: {display_name}")
             skipped += 1
+            if not blocked_by_failure:
+                watermark = get_item_watermark(item) or watermark
             continue
 
         print(f"{prefix} ⬇️  {display_name}")
@@ -71,11 +89,18 @@ def download_all(items: list[dict], output_dir: Path, anonymize: bool = False):
 
         if success:
             downloaded += 1
+            if not blocked_by_failure:
+                watermark = get_item_watermark(item) or watermark
         else:
             failed += 1
+            blocked_by_failure = True
 
         time.sleep(REQUEST_INTERVAL)
 
     print()
     print("─" * 60)
     print(f"✅ 完了: {downloaded} 件ダウンロード / {skipped} 件スキップ / {failed} 件失敗")
+    if failed:
+        print("⚠️  失敗があるため、差分境界は失敗前の日時までしか進めません。")
+
+    return DownloadSummary(downloaded=downloaded, skipped=skipped, failed=failed, watermark=watermark)

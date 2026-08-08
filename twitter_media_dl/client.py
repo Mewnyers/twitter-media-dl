@@ -5,6 +5,10 @@ from datetime import datetime
 from .settings import BATCH_SIZE, REQUEST_DELAY
 
 
+class TwitterFetchError(RuntimeError):
+    """Twitter/X 取得処理を安全に続行できない場合の例外。"""
+
+
 def create_client(auth_token: str, ct0: str):
     """twitter-cli の TwitterClient を作成する。"""
     try:
@@ -91,8 +95,7 @@ def fetch_all_tweets_by_UserTweets(
         try:
             data = client._graphql_get("UserTweets", variables, FEATURES)
         except Exception as e:
-            print(f"   ⚠️  APIエラー（ページ{page + 1}）: {e}")
-            break
+            raise TwitterFetchError(f"APIエラー（UserTweets ページ{page + 1}）: {e}") from e
 
         new_tweets, next_cursor = parse_timeline_response(data, get_instructions)
 
@@ -215,8 +218,7 @@ def fetch_all_tweets_by_UserMedia(
         try:
             data = client._graphql_get("UserMedia", variables, FEATURES)
         except Exception as e:
-            print(f"   ⚠️  APIエラー（ページ{page + 1}）: {e}")
-            break
+            raise TwitterFetchError(f"APIエラー（UserMedia ページ{page + 1}）: {e}") from e
 
         new_tweets, next_cursor = parse_usermedia_response(data)
 

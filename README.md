@@ -139,15 +139,21 @@ input UserID:
 
 ## Differential Mode
 
-By default, the script checks existing files for timestamps in this format:
+Differential mode uses a per-user state file under `downloads/.state/`.
+
+The state file stores the newest timestamp that has been processed continuously without an earlier download failure. Later runs fetch media since that saved timestamp.
+
+Timestamps use this format:
 
 ```text
 [YYYYMMDDhhmmss]
 ```
 
-If files are found for the target username, the newest timestamp is used as the differential boundary. Later runs fetch media since that point instead of doing a full fetch.
+If a media download fails, the differential boundary is only advanced up to the item before the first failure. This prevents a later successful download from hiding an older failed media item on the next run.
 
 Downloads are sorted oldest first. This prevents a partially interrupted run from saving the newest file first and causing the next run to treat older unfinished files as already covered by the differential boundary.
+
+When no state file exists yet, the script performs a full scan once and creates the state file after download processing. Existing files are still skipped.
 
 Use `--full` to ignore this behavior and fetch from the beginning.
 

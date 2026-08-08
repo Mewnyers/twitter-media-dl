@@ -2,12 +2,12 @@ import argparse
 import os
 import sys
 
-from .client import fetch_all_tweets_by_UserMedia, fetch_all_tweets_by_UserTweets
+from .client import TwitterFetchError, fetch_all_tweets_by_UserMedia, fetch_all_tweets_by_UserTweets
 from .config import load_config
 from .debug import write_debug_data
 from .downloader import download_all
 from .media import extract_media_items, sort_media_items_for_download
-from .storage import find_since_datetime, prepare_output_dir
+from .storage import format_download_timestamp, load_since_datetime, prepare_output_dir, save_since_datetime
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,13 +69,23 @@ def main(argv: list[str] | None = None):
     # 差分モード: 既存フォルダのファイル名から最新日時を取得
     since_dt = None
     if not args.full:
-        since_dt = find_since_datetime(username)
+        try:
+            since_dt = load_since_datetime(username)
+        except RuntimeError as e:
+            print(f"❌ {e}")
+            sys.exit(1)
         if since_dt:
             print(f"📅 差分モード: {since_dt.strftime('%Y/%m/%d %H:%M')} 以降を取得")
         else:
             print("📅 全件モード: 既存ファイルが見つからないため全件取得")
 
-    tweets, user = fetch_tweets(username, args.max_count, auth_token, ct0, since_dt)
+    try:
+        tweets, user = fetch_tweets(username, args.max_count, auth_token, ct0, since_dt)
+    except TwitterFetchError as e:
+        print(f"❌ ツイート取得に失敗しました: {e}")
+        print("   差分境界は更新しません。時間を置いて再実行してください。")
+        sys.exit(1)
+
     output_dir = prepare_output_dir(user, username)
 
     print(f"📁 保存先: {output_dir.resolve()}")
@@ -98,4 +108,8 @@ def main(argv: list[str] | None = None):
     print()
 
     # ダウンロード
-    download_all(items, output_dir, anonymize=args.anonymize)
+    initial_watermark = format_download_timestamp(since_dt) if since_dt else None
+    summary = download_all(items, output_dir, initial_watermark=initial_watermark, anonymize=args.anonymize)
+    save_since_datetime(username, summary.watermark)
+    if summary.watermark:
+        print(f"📌 差分境界を保存: {summary.watermark}")
