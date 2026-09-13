@@ -63,17 +63,24 @@ def get_item_watermark(item: dict) -> str | None:
 
 def rename_legacy_file(output_dir: Path, item: dict) -> bool:
     """旧ルールのファイル名が存在する場合、新ルールのファイル名へ移行する。"""
+    legacy_filenames = item.get("legacy_filenames") or []
     legacy_filename = item.get("legacy_filename")
-    if not legacy_filename:
+    if legacy_filename:
+        legacy_filenames = [legacy_filename, *legacy_filenames]
+    if not legacy_filenames:
         return False
 
-    legacy_dest = output_dir / legacy_filename
     dest = output_dir / item["filename"]
-    if not legacy_dest.exists() or dest.exists():
+    if dest.exists():
         return False
 
-    legacy_dest.rename(dest)
-    return True
+    for legacy_filename in dict.fromkeys(legacy_filenames):
+        legacy_dest = output_dir / legacy_filename
+        if legacy_dest.exists():
+            legacy_dest.rename(dest)
+            return True
+
+    return False
 
 
 def download_all(items: list[dict], output_dir: Path, initial_watermark: str | None = None, anonymize: bool = False):

@@ -55,6 +55,8 @@ Examples:
 
 The timestamp is converted to JST by default.
 
+Very long filenames are shortened with a short hash suffix while keeping the extension.
+
 Older filenames created before filename sanitizing rules changed are detected during normal processing. If an old filename exists and the new filename does not, the file is renamed instead of downloaded again.
 
 ## Save Location

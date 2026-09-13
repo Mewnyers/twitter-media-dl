@@ -1,6 +1,6 @@
 import re
 
-from .filename import build_filename, build_legacy_filename, parse_twitter_date
+from .filename import build_filename, build_legacy_filename, build_unlimited_filename, parse_twitter_date
 
 
 def extract_media_items(tweets, include_retweets: bool) -> list[dict]:
@@ -47,12 +47,16 @@ def extract_media_items(tweets, include_retweets: bool) -> list[dict]:
 
             index = i if multiple else None
             filename = build_filename(author, created_at, text, index, url)
-            legacy_filename = build_legacy_filename(author, created_at, text, index, url)
+            legacy_filenames = [
+                build_unlimited_filename(author, created_at, text, index, url),
+                build_legacy_filename(author, created_at, text, index, url),
+            ]
+            legacy_filenames = [name for name in dict.fromkeys(legacy_filenames) if name != filename]
 
             items.append(
                 {
                     "filename": filename,
-                    "legacy_filename": legacy_filename if legacy_filename != filename else None,
+                    "legacy_filenames": legacy_filenames,
                     "url": url,
                     "tweet_id": tweet.id,
                     "type": media_type,

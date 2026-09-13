@@ -2,7 +2,7 @@ import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 
-from .settings import DATE_PATTERN, INVALID_CHARS_RE, TIMEZONE_OFFSET_HOURS, TWEET_CONTENT_MAX_LEN
+from .settings import DATE_PATTERN, FILENAME_MAX_LEN, INVALID_CHARS_RE, TIMEZONE_OFFSET_HOURS, TWEET_CONTENT_MAX_LEN
 
 
 def parse_twitter_date(date_str: str) -> str:
@@ -22,6 +22,25 @@ def sanitize_filename(text: str) -> str:
     return re.sub(r" {2,}", " ", text)
 
 
+def limit_filename(filename: str, max_len: int = FILENAME_MAX_LEN) -> str:
+    """長すぎるファイル名を、拡張子と識別用ハッシュを残して切り詰める。"""
+    if len(filename) <= max_len:
+        return filename
+
+    stem, dot, ext = filename.rpartition(".")
+    if not dot:
+        stem = filename
+        ext = ""
+
+    suffix = "~" + hashlib.sha256(filename.encode()).hexdigest()[:8]
+    ext_part = f".{ext}" if ext else ""
+    max_stem_len = max_len - len(suffix) - len(ext_part)
+    if max_stem_len <= 0:
+        return (hashlib.sha256(filename.encode()).hexdigest()[:max_len]).rstrip()
+
+    return stem[:max_stem_len].rstrip() + suffix + ext_part
+
+
 def legacy_sanitize_filename(text: str) -> str:
     """旧ルールのファイル名正規化。既存ファイル検出専用。"""
     text = INVALID_CHARS_RE.sub("", text)
@@ -32,7 +51,7 @@ def legacy_sanitize_filename(text: str) -> str:
 def anonymize_filename(filename: str) -> str:
     """ファイル名のツイート本文部分をSHA256ハッシュの先頭8文字に置換する。"""
     return re.sub(
-        r"(\[@[^\]]+\]\[\d{12}\] )(.+?)(_\d+)?(\.[^.]+)$",
+        r"(\[@[^\]]+\]\[\d{12,14}\] )(.+?)(_\d+)?(\.[^.]+)$",
         lambda m: m.group(1)
         + hashlib.sha256(m.group(2).encode()).hexdigest()[:8]
         + (m.group(3) or "")
@@ -58,6 +77,19 @@ def build_filename(author: str, created_at: str, text: str, index: int | None, m
 
     # URL例: https://pbs.twimg.com/media/xxx.jpg?format=jpg&name=orig
     #        https://video.twimg.com/xxx/xxx.mp4
+    url_path = media_url.split("?")[0]
+    ext = url_path.rsplit(".", 1)[-1] if "." in url_path else "jpg"
+    ext = ext.lower()
+
+    index_str = f"_{index}" if index is not None else ""
+    return limit_filename(f"[@{author}][{date_str}] {content}{index_str}.{ext}")
+
+
+def build_unlimited_filename(author: str, created_at: str, text: str, index: int | None, media_url: str) -> str:
+    """長さ制限導入前の新ルールで作られた既存ファイル名を再計算する。"""
+    date_str = parse_twitter_date(created_at)
+    content = sanitize_filename(truncate_content(text))
+
     url_path = media_url.split("?")[0]
     ext = url_path.rsplit(".", 1)[-1] if "." in url_path else "jpg"
     ext = ext.lower()
