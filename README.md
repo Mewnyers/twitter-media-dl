@@ -55,6 +55,8 @@ Examples:
 
 The timestamp is converted to JST by default.
 
+Older filenames created before filename sanitizing rules changed are detected during normal processing. If an old filename exists and the new filename does not, the file is renamed instead of downloaded again.
+
 ## Save Location
 
 Downloaded media is saved under `downloads/` in a folder based on the user's display name, username, and the current date.

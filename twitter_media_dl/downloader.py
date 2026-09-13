@@ -13,6 +13,7 @@ from .settings import REQUEST_INTERVAL
 class DownloadSummary:
     downloaded: int
     skipped: int
+    renamed: int
     failed: int
     watermark: str | None
 
@@ -60,10 +61,26 @@ def get_item_watermark(item: dict) -> str | None:
     return item.get("created_at_sort")
 
 
+def rename_legacy_file(output_dir: Path, item: dict) -> bool:
+    """旧ルールのファイル名が存在する場合、新ルールのファイル名へ移行する。"""
+    legacy_filename = item.get("legacy_filename")
+    if not legacy_filename:
+        return False
+
+    legacy_dest = output_dir / legacy_filename
+    dest = output_dir / item["filename"]
+    if not legacy_dest.exists() or dest.exists():
+        return False
+
+    legacy_dest.rename(dest)
+    return True
+
+
 def download_all(items: list[dict], output_dir: Path, initial_watermark: str | None = None, anonymize: bool = False):
     """全メディアをダウンロードする。"""
     total = len(items)
     skipped = 0
+    renamed = 0
     downloaded = 0
     failed = 0
     watermark = initial_watermark
@@ -84,6 +101,22 @@ def download_all(items: list[dict], output_dir: Path, initial_watermark: str | N
                 watermark = get_item_watermark(item) or watermark
             continue
 
+        try:
+            legacy_renamed = rename_legacy_file(output_dir, item)
+        except OSError as e:
+            print(f"{prefix} ⚠️  旧ファイル名のリネーム失敗: {e}")
+            failed += 1
+            blocked_by_failure = True
+            time.sleep(REQUEST_INTERVAL)
+            continue
+
+        if legacy_renamed:
+            print(f"{prefix} 🔁  リネーム: {display_name}")
+            renamed += 1
+            if not blocked_by_failure:
+                watermark = get_item_watermark(item) or watermark
+            continue
+
         print(f"{prefix} ⬇️  {display_name}")
         success = download_file(url, dest)
 
@@ -99,8 +132,8 @@ def download_all(items: list[dict], output_dir: Path, initial_watermark: str | N
 
     print()
     print("─" * 60)
-    print(f"✅ 完了: {downloaded} 件ダウンロード / {skipped} 件スキップ / {failed} 件失敗")
+    print(f"✅ 完了: {downloaded} 件ダウンロード / {renamed} 件リネーム / {skipped} 件スキップ / {failed} 件失敗")
     if failed:
         print("⚠️  失敗があるため、差分境界は失敗前の日時までしか進めません。")
 
-    return DownloadSummary(downloaded=downloaded, skipped=skipped, failed=failed, watermark=watermark)
+    return DownloadSummary(downloaded=downloaded, skipped=skipped, renamed=renamed, failed=failed, watermark=watermark)

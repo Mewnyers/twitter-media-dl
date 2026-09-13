@@ -22,6 +22,13 @@ def sanitize_filename(text: str) -> str:
     return re.sub(r" {2,}", " ", text)
 
 
+def legacy_sanitize_filename(text: str) -> str:
+    """旧ルールのファイル名正規化。既存ファイル検出専用。"""
+    text = INVALID_CHARS_RE.sub("", text)
+    text = text.strip()
+    return re.sub(r" {2,}", " ", text)
+
+
 def anonymize_filename(filename: str) -> str:
     """ファイル名のツイート本文部分をSHA256ハッシュの先頭8文字に置換する。"""
     return re.sub(
@@ -51,6 +58,19 @@ def build_filename(author: str, created_at: str, text: str, index: int | None, m
 
     # URL例: https://pbs.twimg.com/media/xxx.jpg?format=jpg&name=orig
     #        https://video.twimg.com/xxx/xxx.mp4
+    url_path = media_url.split("?")[0]
+    ext = url_path.rsplit(".", 1)[-1] if "." in url_path else "jpg"
+    ext = ext.lower()
+
+    index_str = f"_{index}" if index is not None else ""
+    return f"[@{author}][{date_str}] {content}{index_str}.{ext}"
+
+
+def build_legacy_filename(author: str, created_at: str, text: str, index: int | None, media_url: str) -> str:
+    """旧ルールで作られた既存ファイル名を再計算する。"""
+    date_str = parse_twitter_date(created_at)
+    content = legacy_sanitize_filename(truncate_content(text))
+
     url_path = media_url.split("?")[0]
     ext = url_path.rsplit(".", 1)[-1] if "." in url_path else "jpg"
     ext = ext.lower()
