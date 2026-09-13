@@ -9,6 +9,7 @@ from .storage import (
     find_downloaded_user_folders,
     find_latest_downloaded_datetime,
     format_download_timestamp,
+    is_unavailable_state,
     load_since_datetime,
     prepare_output_dir,
     save_active_state,
@@ -49,28 +50,27 @@ def scan_downloaded_items(
         display_name = anonymize_filename(filename) if anonymize else filename
         prefix = f"[{idx}/{total}]"
 
-        if any((output_dir / filename).exists() for output_dir in output_dirs):
-            print(f"{prefix} [OK] 確認済み: {display_name}")
-            found += 1
-            if not blocked_by_gap:
-                watermark = get_item_watermark(item) or watermark
-            continue
-
         try:
-            legacy_renamed = False
+            renamed_in_any_dir = False
             for output_dir in output_dirs:
                 if rename_legacy_file(output_dir, item):
-                    legacy_renamed = True
-                    break
+                    renamed_in_any_dir = True
         except OSError as e:
             print(f"{prefix} [WARN] 旧ファイル名のリネーム失敗: {e}")
             failed += 1
             blocked_by_gap = True
             continue
 
-        if legacy_renamed:
+        if renamed_in_any_dir:
             print(f"{prefix} [RENAME] リネーム: {display_name}")
             renamed += 1
+            if not blocked_by_gap:
+                watermark = get_item_watermark(item) or watermark
+            continue
+
+        if any((output_dir / filename).exists() for output_dir in output_dirs):
+            print(f"{prefix} [OK] 確認済み: {display_name}")
+            found += 1
             if not blocked_by_gap:
                 watermark = get_item_watermark(item) or watermark
             continue
@@ -96,7 +96,20 @@ def _save_unavailable(username: str, error: Exception, folders: list[Path], down
     print(f"   取得不能として状態ファイルに記録しました: {error}")
 
 
-def scan_downloads(auth_token: str, ct0: str, *, include_retweets: bool = False, anonymize: bool = False):
+def _should_skip_unavailable(username: str, retry_unavailable: bool) -> bool:
+    if retry_unavailable:
+        return False
+    return is_unavailable_state(username, DOWNLOADS_DIR)
+
+
+def scan_downloads(
+    auth_token: str,
+    ct0: str,
+    *,
+    include_retweets: bool = False,
+    anonymize: bool = False,
+    retry_unavailable: bool = False,
+):
     """downloads 配下のユーザーを一括スキャンし、リネームと状態作成を行う。"""
     users = find_downloaded_user_folders(DOWNLOADS_DIR)
     if not users:
@@ -110,6 +123,14 @@ def scan_downloads(auth_token: str, ct0: str, *, include_retweets: bool = False,
         print("=" * 60)
         print(f"[{index}/{len(users)}] @{username}")
         print(f"   対象フォルダ: {[folder.name for folder in folders]}")
+
+        try:
+            if _should_skip_unavailable(username, retry_unavailable):
+                print("   取得不能として記録済みのためスキップします。再確認する場合は --retry-unavailable を指定してください。")
+                continue
+        except RuntimeError as e:
+            print(f"[ERROR] {e}")
+            continue
 
         try:
             tweets, _ = fetch_tweets(username, None, auth_token, ct0, None)
@@ -136,6 +157,7 @@ def update_all_downloads(
     include_retweets: bool = False,
     full: bool = False,
     anonymize: bool = False,
+    retry_unavailable: bool = False,
 ):
     """downloads 配下のユーザーを一括更新する。"""
     users = find_downloaded_user_folders(DOWNLOADS_DIR)
@@ -149,6 +171,14 @@ def update_all_downloads(
         print()
         print("=" * 60)
         print(f"[{index}/{len(users)}] @{username}")
+
+        try:
+            if _should_skip_unavailable(username, retry_unavailable):
+                print("   取得不能として記録済みのためスキップします。再確認する場合は --retry-unavailable を指定してください。")
+                continue
+        except RuntimeError as e:
+            print(f"[ERROR] {e}")
+            continue
 
         since_dt = None
         if not full:

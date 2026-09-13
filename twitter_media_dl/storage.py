@@ -133,6 +133,14 @@ def save_unavailable_state(
     write_user_state(username, state, downloads_dir)
 
 
+def is_unavailable_state(username: str, downloads_dir: str = DOWNLOADS_DIR) -> bool:
+    """状態ファイル上で取得不能ユーザーとして記録されているかを返す。"""
+    state = load_user_state(username, downloads_dir)
+    if not state:
+        return False
+    return state.get("status") == STATE_STATUS_UNAVAILABLE
+
+
 def find_latest_downloaded_datetime(username: str, downloads_dir: str = DOWNLOADS_DIR):
     """既存フォルダ内のファイル名から最新ダウンロード日時を探す。"""
     dl_root = Path(downloads_dir)

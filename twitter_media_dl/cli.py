@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="ツイートの生データをJSONに出力してデバッグ（ダウンロードは行わない）")
     parser.add_argument("--scan-downloads", action="store_true", help="downloads配下を一括スキャンし、旧ファイル名のリネームと状態作成だけを行う")
     parser.add_argument("--update-all", action="store_true", help="downloads配下の全ユーザーを一括更新する")
+    parser.add_argument("--retry-unavailable", action="store_true", help="取得不能として記録済みのユーザーも一括処理で再確認する")
     return parser
 
 
@@ -41,6 +42,8 @@ def parse_args(argv: list[str] | None = None):
         parser.error("--scan-downloads / --update-all では --max を指定できません。")
     if bulk_mode and args.debug:
         parser.error("--scan-downloads / --update-all では --debug を指定できません。")
+    if not bulk_mode and args.retry_unavailable:
+        parser.error("--retry-unavailable は --scan-downloads / --update-all と一緒に指定してください。")
     if not bulk_mode and not args.username:
         parser.error("username を指定してください。")
 
@@ -67,7 +70,13 @@ def main(argv: list[str] | None = None):
     auth_token, ct0 = load_auth()
 
     if args.scan_downloads:
-        scan_downloads(auth_token, ct0, include_retweets=args.include_retweets, anonymize=args.anonymize)
+        scan_downloads(
+            auth_token,
+            ct0,
+            include_retweets=args.include_retweets,
+            anonymize=args.anonymize,
+            retry_unavailable=args.retry_unavailable,
+        )
         return
     if args.update_all:
         update_all_downloads(
@@ -76,6 +85,7 @@ def main(argv: list[str] | None = None):
             include_retweets=args.include_retweets,
             full=args.full,
             anonymize=args.anonymize,
+            retry_unavailable=args.retry_unavailable,
         )
         return
 
