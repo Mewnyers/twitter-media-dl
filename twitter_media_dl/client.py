@@ -61,8 +61,7 @@ def fetch_all_tweets_by_UserTweets(
     try:
         user = client.fetch_user(username)
     except Exception as e:
-        print(f"❌ ユーザー取得失敗: {e}")
-        sys.exit(1)
+        raise TwitterFetchError(f"ユーザー取得失敗（UserTweets）: {e}") from e
     user_id = user.id
     print(f"   ID: {user_id}  ツイート数: {user.tweets_count:,}")
 
@@ -157,8 +156,7 @@ def fetch_all_tweets_by_UserMedia(
     try:
         user = client.fetch_user(username)
     except Exception as e:
-        print(f"❌ ユーザー取得失敗: {e}")
-        sys.exit(1)
+        raise TwitterFetchError(f"ユーザー取得失敗（UserMedia）: {e}") from e
     user_id = user.id
     print(f"   ID: {user_id}  ツイート数: {user.tweets_count:,}")
 
@@ -248,3 +246,22 @@ def fetch_all_tweets_by_UserMedia(
         all_tweets = all_tweets[:max_count]
 
     return all_tweets, user
+
+
+def fetch_tweets(username: str, max_count: int | None, auth_token: str, ct0: str, since_dt: datetime | None):
+    """通常処理で使うツイート取得方法を選ぶ。"""
+    if since_dt is None:
+        # 初回: UserTweets（全件）→ UserMedia（全件）で完全取得
+        tweets_usertweets, user = fetch_all_tweets_by_UserTweets(username, max_count, auth_token, ct0)
+        tweets_usermedia, _ = fetch_all_tweets_by_UserMedia(username, max_count, auth_token, ct0)
+
+        # 重複除去して合算
+        seen_ids = {t.id for t in tweets_usertweets}
+        for tweet in tweets_usermedia:
+            if tweet.id not in seen_ids:
+                tweets_usertweets.append(tweet)
+                seen_ids.add(tweet.id)
+        return tweets_usertweets, user
+
+    # 2回目以降: UserMedia（差分）のみ
+    return fetch_all_tweets_by_UserMedia(username, max_count, auth_token, ct0, since_dt)

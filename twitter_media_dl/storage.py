@@ -9,6 +9,9 @@ from .settings import DOWNLOADS_DIR, TIMEZONE_OFFSET_HOURS
 
 STATE_DIR_NAME = ".state"
 STATE_VERSION = 1
+STATE_STATUS_ACTIVE = "active"
+STATE_STATUS_UNAVAILABLE = "unavailable"
+DOWNLOAD_USER_RE = re.compile(r"\(@([^)]+)\)")
 
 
 def parse_download_timestamp(timestamp: str):
@@ -30,6 +33,51 @@ def get_state_path(username: str, downloads_dir: str = DOWNLOADS_DIR) -> Path:
     return Path(downloads_dir) / STATE_DIR_NAME / f"{username}.json"
 
 
+def load_user_state(username: str, downloads_dir: str = DOWNLOADS_DIR):
+    """ユーザーごとの状態ファイルを読み込む。存在しない場合は None を返す。"""
+    state_path = get_state_path(username, downloads_dir)
+    if not state_path.exists():
+        return None
+
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"状態ファイルを読み込めません: {state_path} ({e})") from e
+
+
+def write_user_state(username: str, state: dict, downloads_dir: str = DOWNLOADS_DIR):
+    """ユーザーごとの状態ファイルを書き込む。"""
+    state_path = get_state_path(username, downloads_dir)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def build_base_state(username: str, status: str):
+    """状態ファイルで共通して使うメタ情報を作る。"""
+    return {
+        "version": STATE_VERSION,
+        "username": username,
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def save_active_state(
+    username: str,
+    watermark: str | None = None,
+    *,
+    folders: list[str] | None = None,
+    downloads_dir: str = DOWNLOADS_DIR,
+):
+    """取得可能ユーザーの状態を保存する。"""
+    state = build_base_state(username, STATE_STATUS_ACTIVE)
+    if watermark:
+        state["watermark"] = watermark
+    if folders:
+        state["folders"] = folders
+    write_user_state(username, state, downloads_dir)
+
+
 def load_since_datetime(username: str, downloads_dir: str = DOWNLOADS_DIR):
     """状態ファイルに保存された差分取得の境界日時を読む。"""
     state_path = get_state_path(username, downloads_dir)
@@ -40,10 +88,12 @@ def load_since_datetime(username: str, downloads_dir: str = DOWNLOADS_DIR):
             print("   状態ファイル未作成のため、安全確認として全件取得します。")
         return None
 
-    try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"状態ファイルを読み込めません: {state_path} ({e})") from e
+    state = load_user_state(username, downloads_dir)
+    status = state.get("status", STATE_STATUS_ACTIVE)
+    if status == STATE_STATUS_UNAVAILABLE:
+        print(f"   状態ファイル確認: {state_path}")
+        print("   前回はユーザー取得不能として記録されています。再確認のため全件取得します。")
+        return None
 
     watermark = state.get("watermark")
     if not watermark:
@@ -62,15 +112,25 @@ def save_since_datetime(username: str, watermark: str | None, downloads_dir: str
     if not watermark:
         return
 
-    state_path = get_state_path(username, downloads_dir)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state = {
-        "version": STATE_VERSION,
-        "username": username,
-        "watermark": watermark,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_active_state(username, watermark, downloads_dir=downloads_dir)
+
+
+def save_unavailable_state(
+    username: str,
+    reason: str,
+    *,
+    watermark: str | None = None,
+    folders: list[str] | None = None,
+    downloads_dir: str = DOWNLOADS_DIR,
+):
+    """取得不能ユーザーの状態を、既存ファイルを残したまま記録する。"""
+    state = build_base_state(username, STATE_STATUS_UNAVAILABLE)
+    state["reason"] = reason
+    if watermark:
+        state["watermark"] = watermark
+    if folders:
+        state["folders"] = folders
+    write_user_state(username, state, downloads_dir)
 
 
 def find_latest_downloaded_datetime(username: str, downloads_dir: str = DOWNLOADS_DIR):
@@ -95,6 +155,24 @@ def find_latest_downloaded_datetime(username: str, downloads_dir: str = DOWNLOAD
         return None, matched_folders
 
     return max(candidates), matched_folders
+
+
+def find_downloaded_user_folders(downloads_dir: str = DOWNLOADS_DIR):
+    """downloads 配下のユーザー別フォルダを username ごとに集める。"""
+    dl_root = Path(downloads_dir)
+    users = {}
+    if not dl_root.exists():
+        return users
+
+    for folder in dl_root.iterdir():
+        if not folder.is_dir() or folder.name == STATE_DIR_NAME:
+            continue
+        m = DOWNLOAD_USER_RE.search(folder.name)
+        if not m:
+            continue
+        users.setdefault(m.group(1), []).append(folder)
+
+    return dict(sorted(users.items()))
 
 
 def prepare_output_dir(user, username: str, downloads_dir: str = DOWNLOADS_DIR) -> Path:

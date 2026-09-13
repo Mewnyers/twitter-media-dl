@@ -2,22 +2,25 @@ import argparse
 import os
 import sys
 
-from .client import TwitterFetchError, fetch_all_tweets_by_UserMedia, fetch_all_tweets_by_UserTweets
+from .client import TwitterFetchError, fetch_tweets
 from .config import load_config
 from .debug import write_debug_data
 from .downloader import download_all
+from .maintenance import scan_downloads, update_all_downloads
 from .media import extract_media_items, sort_media_items_for_download
 from .storage import format_download_timestamp, load_since_datetime, prepare_output_dir, save_since_datetime
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Twitter/X ユーザーのメディアを一括ダウンロードします。")
-    parser.add_argument("username", help="ダウンロード対象のユーザーID（@なし）")
+    parser.add_argument("username", nargs="?", help="ダウンロード対象のユーザーID（@なし）")
     parser.add_argument("--max", type=int, default=None, dest="max_count", help="取得するツイートの最大件数（省略時は全件取得）")
     parser.add_argument("--include-retweets", action="store_true", help="リツイートのメディアも含める（デフォルト: 除外）")
     parser.add_argument("--full", action="store_true", help="差分モードを無視して全件取得する")
     parser.add_argument("--anonymize", action="store_true", help="デバッグ出力のツイート本文をハッシュ化する")
     parser.add_argument("--debug", action="store_true", help="ツイートの生データをJSONに出力してデバッグ（ダウンロードは行わない）")
+    parser.add_argument("--scan-downloads", action="store_true", help="downloads配下を一括スキャンし、旧ファイル名のリネームと状態作成だけを行う")
+    parser.add_argument("--update-all", action="store_true", help="downloads配下の全ユーザーを一括更新する")
     return parser
 
 
@@ -25,7 +28,23 @@ def parse_args(argv: list[str] | None = None):
     if argv is None and len(sys.argv) == 1:
         user_input = input("input UserID: ").strip()
         sys.argv.extend(user_input.split())
-    return build_parser().parse_args(argv)
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    bulk_mode = args.scan_downloads or args.update_all
+
+    if args.scan_downloads and args.update_all:
+        parser.error("--scan-downloads と --update-all は同時に指定できません。")
+    if bulk_mode and args.username:
+        parser.error("--scan-downloads / --update-all では username を指定しないでください。")
+    if bulk_mode and args.max_count is not None:
+        parser.error("--scan-downloads / --update-all では --max を指定できません。")
+    if bulk_mode and args.debug:
+        parser.error("--scan-downloads / --update-all では --debug を指定できません。")
+    if not bulk_mode and not args.username:
+        parser.error("username を指定してください。")
+
+    return args
 
 
 def load_auth():
@@ -43,28 +62,24 @@ def load_auth():
     return auth_token, ct0
 
 
-def fetch_tweets(username: str, max_count: int | None, auth_token: str, ct0: str, since_dt):
-    if since_dt is None:
-        # 初回: UserTweets（全件）→ UserMedia（全件）で完全取得
-        tweets_usertweets, user = fetch_all_tweets_by_UserTweets(username, max_count, auth_token, ct0)
-        tweets_usermedia, _ = fetch_all_tweets_by_UserMedia(username, max_count, auth_token, ct0)
-
-        # 重複除去して合算
-        seen_ids = {t.id for t in tweets_usertweets}
-        for tweet in tweets_usermedia:
-            if tweet.id not in seen_ids:
-                tweets_usertweets.append(tweet)
-                seen_ids.add(tweet.id)
-        return tweets_usertweets, user
-
-    # 2回目以降: UserMedia（差分）のみ
-    return fetch_all_tweets_by_UserMedia(username, max_count, auth_token, ct0, since_dt)
-
-
 def main(argv: list[str] | None = None):
     args = parse_args(argv)
-    username = args.username.lstrip("@")
     auth_token, ct0 = load_auth()
+
+    if args.scan_downloads:
+        scan_downloads(auth_token, ct0, include_retweets=args.include_retweets, anonymize=args.anonymize)
+        return
+    if args.update_all:
+        update_all_downloads(
+            auth_token,
+            ct0,
+            include_retweets=args.include_retweets,
+            full=args.full,
+            anonymize=args.anonymize,
+        )
+        return
+
+    username = args.username.lstrip("@")
 
     # 差分モード: 既存フォルダのファイル名から最新日時を取得
     since_dt = None

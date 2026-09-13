@@ -14,6 +14,8 @@ A Python script to bulk download media (images and videos) from a specified Twit
 - Skips already-downloaded files
 - Downloads older media first so interrupted differential runs do not skip unfinished older files
 - Saves filenames with the author, tweet timestamp, and tweet text
+- Can scan existing downloaded folders to rename old filenames and rebuild state files
+- Can update all users already present under `downloads/`
 - Can write debug JSON without downloading media
 
 ## Project Structure
@@ -25,6 +27,7 @@ twitter_media_dl/
   client.py               # Twitter/X API access through twitter-cli
   media.py                # Media extraction and download ordering
   downloader.py           # File download logic
+  maintenance.py          # Batch scan/update maintenance workflows
   storage.py              # Differential mode and output directory handling
   filename.py             # Filename formatting and sanitizing
   config.py               # config.yaml loading
@@ -133,6 +136,12 @@ python twitter-media-dl.py <username> --debug
 
 # Hash tweet text in debug output and download logs
 python twitter-media-dl.py <username> --anonymize
+
+# Scan all existing downloads, rename old filenames, and rebuild state files
+python twitter-media-dl.py --scan-downloads
+
+# Update every user folder found under downloads/
+python twitter-media-dl.py --update-all
 ```
 
 If the script is launched without arguments, it asks for input interactively:
@@ -160,6 +169,16 @@ Downloads are sorted oldest first. This prevents a partially interrupted run fro
 When no state file exists yet, the script performs a full scan once and creates the state file after download processing. Existing files are still skipped.
 
 Use `--full` to ignore this behavior and fetch from the beginning.
+
+## Batch Maintenance
+
+`--scan-downloads` scans user folders under `downloads/` whose folder name contains `(@username)`.
+
+It fetches the user's current tweet metadata, checks already-downloaded media files, renames files created with older filename rules, and writes per-user state files. It does not download missing media. If a media file is missing, the saved differential boundary stops before that gap so later runs do not skip it.
+
+If a user cannot be fetched because the account was deleted, suspended, renamed, or is otherwise unavailable, the script records that user as `unavailable` under `downloads/.state/` and continues with the next user.
+
+Use `--update-all` when you want to scan the same set of user folders and download missing or newer media as well. `--full` can be combined with `--update-all` to ignore existing differential boundaries for every user.
 
 ## Example Output
 
