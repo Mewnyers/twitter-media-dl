@@ -15,8 +15,9 @@ def parse_twitter_date(date_str: str) -> str:
 
 
 def sanitize_filename(text: str) -> str:
-    """ファイル名に使えない文字を除去し、空白を整理する。"""
-    text = INVALID_CHARS_RE.sub("", text)
+    """ファイル名に使えない文字をスペース化し、空白を整理する。"""
+    text = re.sub(r"\s+", " ", text)
+    text = INVALID_CHARS_RE.sub(" ", text)
     text = text.strip()
     return re.sub(r" {2,}", " ", text)
 
