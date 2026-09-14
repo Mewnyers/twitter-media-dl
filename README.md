@@ -16,6 +16,7 @@ A Python script to bulk download media (images and videos) from a specified Twit
 - Saves filenames with the author, tweet timestamp, and tweet text
 - Can scan existing downloaded folders to rename old filenames and rebuild state files
 - Can update all users already present under `downloads/`
+- Can download users listed in a text file
 - Can write debug JSON without downloading media
 
 ## Project Structure
@@ -142,6 +143,12 @@ python twitter-media-dl.py --scan-downloads
 
 # Update every user folder found under downloads/
 python twitter-media-dl.py --update-all
+
+# Download users listed in a text file
+python twitter-media-dl.py users.txt
+
+# Retry users previously recorded as unavailable
+python twitter-media-dl.py --update-all --retry-unavailable
 ```
 
 If the script is launched without arguments, it asks for input interactively:
@@ -170,13 +177,35 @@ When no state file exists yet, the script performs a full scan once and creates 
 
 Use `--full` to ignore this behavior and fetch from the beginning.
 
+## User List
+
+If the positional argument is a text file path, the script reads it as a user list and processes users from top to bottom. Blank lines are ignored. Lines can contain `#` comments. Usernames can be written with or without `@`.
+
+Example:
+
+```text
+elonmusk
+@x
+
+# More users
+openai
+```
+
+Run it by passing the list file instead of a username:
+
+```bash
+python twitter-media-dl.py users.txt
+```
+
+Duplicate usernames are processed only once, keeping the first occurrence. User-list mode intentionally uses the normal default download settings for every user.
+
 ## Batch Maintenance
 
 `--scan-downloads` scans user folders under `downloads/` whose folder name contains `(@username)`.
 
 It fetches the user's current tweet metadata, checks already-downloaded media files, renames files created with older filename rules, and writes per-user state files. It does not download missing media. If a media file is missing, the saved differential boundary stops before that gap so later runs do not skip it.
 
-If a user cannot be fetched because the account was deleted, suspended, renamed, or is otherwise unavailable, the script records that user as `unavailable` under `downloads/.state/` and continues with the next user.
+If a user cannot be fetched because the account was deleted, suspended, renamed, or is otherwise unavailable, the script records that user as `unavailable` under `downloads/.state/` and continues with the next user. Later batch runs skip users already recorded as `unavailable`. Use `--retry-unavailable` with `--scan-downloads` or `--update-all` to check them again.
 
 Use `--update-all` when you want to scan the same set of user folders and download missing or newer media as well. `--full` can be combined with `--update-all` to ignore existing differential boundaries for every user.
 
