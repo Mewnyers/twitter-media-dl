@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 
 from .settings import BATCH_SIZE, REQUEST_DELAY
+from .throttle import wait_between_endpoints
 
 
 class TwitterFetchError(RuntimeError):
@@ -253,6 +254,7 @@ def fetch_tweets(username: str, max_count: int | None, auth_token: str, ct0: str
     if since_dt is None:
         # 初回: UserTweets（全件）→ UserMedia（全件）で完全取得
         tweets_usertweets, user = fetch_all_tweets_by_UserTweets(username, max_count, auth_token, ct0)
+        wait_between_endpoints()
         tweets_usermedia, _ = fetch_all_tweets_by_UserMedia(username, max_count, auth_token, ct0)
 
         # 重複除去して合算

@@ -209,6 +209,12 @@ If a user cannot be fetched because the account was deleted, suspended, renamed,
 
 Use `--update-all` when you want to scan the same set of user folders and download missing or newer media as well. `--full` can be combined with `--update-all` to ignore existing differential boundaries for every user.
 
+## Rate Limits
+
+The script intentionally waits between API pages, between the initial `UserTweets` and `UserMedia` requests, between media downloads, and between users in batch/list processing.
+
+If Twitter/X returns a rate limit error such as HTTP 429 after the underlying retry attempts, batch/list processing waits longer before moving to the next user. A rate limit error does not mark the user as unavailable.
+
 ## Example Output
 
 ```text
@@ -231,7 +237,10 @@ Use `--update-all` when you want to scan the same set of user folders and downlo
 ## Notes
 
 - Cookie-based authentication is used.
-- Pagination requests wait 1.5 seconds between pages.
+- Pagination requests wait 3 seconds between pages.
+- The first full run waits 5 seconds between `UserTweets` and `UserMedia`.
+- Batch/list processing waits 60 seconds between users.
+- Batch/list processing waits 15 minutes after a rate limit error before moving to the next user.
 - Media downloads wait 0.5 seconds between files.
 - HTTPS media downloads use `certifi`'s CA bundle when available.
 - If the script stops working due to Twitter/X API changes, try updating with `pip install --upgrade twitter-cli`.

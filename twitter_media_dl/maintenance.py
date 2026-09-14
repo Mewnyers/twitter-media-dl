@@ -16,6 +16,7 @@ from .storage import (
     save_since_datetime,
     save_unavailable_state,
 )
+from .throttle import is_rate_limited, wait_after_rate_limit, wait_between_users
 
 
 @dataclass
@@ -102,6 +103,11 @@ def _should_skip_unavailable(username: str, retry_unavailable: bool) -> bool:
     return is_unavailable_state(username, DOWNLOADS_DIR)
 
 
+def _is_unavailable_user_error(error: Exception) -> bool:
+    """ユーザー自体が取得不能なエラーかを判定する。API一時失敗は含めない。"""
+    return "ユーザー取得失敗" in str(error)
+
+
 def scan_downloads(
     auth_token: str,
     ct0: str,
@@ -119,6 +125,7 @@ def scan_downloads(
     print(f"一括スキャン対象: {len(users)} ユーザー")
 
     for index, (username, folders) in enumerate(users.items(), start=1):
+        rate_limited = False
         print()
         print("=" * 60)
         print(f"[{index}/{len(users)}] @{username}")
@@ -135,19 +142,28 @@ def scan_downloads(
         try:
             tweets, _ = fetch_tweets(username, None, auth_token, ct0, None)
         except TwitterFetchError as e:
-            _save_unavailable(username, e, folders, DOWNLOADS_DIR)
-            continue
+            rate_limited = is_rate_limited(e)
+            if rate_limited:
+                print(f"[ERROR] rate limit のため取得を中断しました: {e}")
+            elif _is_unavailable_user_error(e):
+                _save_unavailable(username, e, folders, DOWNLOADS_DIR)
+            else:
+                print(f"[ERROR] ツイート取得に失敗しました。状態ファイルは更新しません: {e}")
+        else:
+            items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
+            if not items:
+                save_active_state(username, folders=[folder.name for folder in folders])
+                print("メディア付きツイートが見つかりませんでした。")
+            else:
+                summary = scan_downloaded_items(items, folders, anonymize=anonymize)
+                save_active_state(username, summary.watermark, folders=[folder.name for folder in folders])
+                if summary.watermark:
+                    print(f"差分境界を保存: {summary.watermark}")
 
-        items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
-        if not items:
-            save_active_state(username, folders=[folder.name for folder in folders])
-            print("メディア付きツイートが見つかりませんでした。")
-            continue
-
-        summary = scan_downloaded_items(items, folders, anonymize=anonymize)
-        save_active_state(username, summary.watermark, folders=[folder.name for folder in folders])
-        if summary.watermark:
-            print(f"差分境界を保存: {summary.watermark}")
+        if index < len(users):
+            if rate_limited:
+                wait_after_rate_limit()
+            wait_between_users()
 
 
 def update_all_downloads(
@@ -168,6 +184,7 @@ def update_all_downloads(
     print(f"一括更新対象: {len(users)} ユーザー")
 
     for index, (username, folders) in enumerate(users.items(), start=1):
+        rate_limited = False
         print()
         print("=" * 60)
         print(f"[{index}/{len(users)}] @{username}")
@@ -197,24 +214,33 @@ def update_all_downloads(
         try:
             tweets, user = fetch_tweets(username, None, auth_token, ct0, since_dt)
         except TwitterFetchError as e:
-            _save_unavailable(username, e, folders, DOWNLOADS_DIR)
-            continue
+            rate_limited = is_rate_limited(e)
+            if rate_limited:
+                print(f"[ERROR] rate limit のため取得を中断しました: {e}")
+            elif _is_unavailable_user_error(e):
+                _save_unavailable(username, e, folders, DOWNLOADS_DIR)
+            else:
+                print(f"[ERROR] ツイート取得に失敗しました。状態ファイルは更新しません: {e}")
+        else:
+            output_dir = prepare_output_dir(user, username)
+            print(f"保存先: {output_dir.resolve()}")
+            print(f"取得ツイート数: {len(tweets)} 件")
 
-        output_dir = prepare_output_dir(user, username)
-        print(f"保存先: {output_dir.resolve()}")
-        print(f"取得ツイート数: {len(tweets)} 件")
+            items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
+            if not items:
+                print("ダウンロード対象のメディアが見つかりませんでした。")
+            else:
+                rt_msg = "（リツイート含む）" if include_retweets else "（リツイート除外）"
+                print(f"メディア数: {len(items)} 件 {rt_msg}")
+                print()
 
-        items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
-        if not items:
-            print("ダウンロード対象のメディアが見つかりませんでした。")
-            continue
+                initial_watermark = format_download_timestamp(since_dt) if since_dt else None
+                summary = download_all(items, output_dir, initial_watermark=initial_watermark, anonymize=anonymize)
+                save_since_datetime(username, summary.watermark)
+                if summary.watermark:
+                    print(f"差分境界を保存: {summary.watermark}")
 
-        rt_msg = "（リツイート含む）" if include_retweets else "（リツイート除外）"
-        print(f"メディア数: {len(items)} 件 {rt_msg}")
-        print()
-
-        initial_watermark = format_download_timestamp(since_dt) if since_dt else None
-        summary = download_all(items, output_dir, initial_watermark=initial_watermark, anonymize=anonymize)
-        save_since_datetime(username, summary.watermark)
-        if summary.watermark:
-            print(f"差分境界を保存: {summary.watermark}")
+        if index < len(users):
+            if rate_limited:
+                wait_after_rate_limit()
+            wait_between_users()

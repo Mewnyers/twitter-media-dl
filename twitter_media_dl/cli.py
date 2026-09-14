@@ -16,6 +16,7 @@ from .storage import (
     prepare_output_dir,
     save_since_datetime,
 )
+from .throttle import is_rate_limited, wait_after_rate_limit, wait_between_users
 
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
@@ -140,15 +141,15 @@ def download_user(
     debug: bool,
     auth_token: str,
     ct0: str,
-) -> bool:
-    """1ユーザー分の通常ダウンロード処理を行う。成功時 True、取得失敗時 False。"""
+) -> tuple[bool, bool]:
+    """1ユーザー分の通常ダウンロード処理を行う。戻り値は (成功, rate limit 検出)。"""
     since_dt = None
     if not full:
         try:
             since_dt = load_since_datetime(username)
         except RuntimeError as e:
             print(f"❌ {e}")
-            return False
+            return False, False
         if since_dt:
             print(f"📅 差分モード: {since_dt.strftime('%Y/%m/%d %H:%M')} 以降を取得")
         else:
@@ -161,7 +162,7 @@ def download_user(
     except TwitterFetchError as e:
         print(f"❌ ツイート取得に失敗しました: {e}")
         print("   差分境界は更新しません。時間を置いて再実行してください。")
-        return False
+        return False, is_rate_limited(e)
 
     output_dir = prepare_output_dir(user, username)
 
@@ -172,13 +173,13 @@ def download_user(
     if debug:
         out_path = write_debug_data(tweets, username, anonymize=anonymize)
         print(f"📄 デバッグデータを出力しました: {out_path}")
-        return True
+        return True, False
 
     # メディア抽出
     items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
     if not items:
         print("ℹ️  ダウンロード対象のメディアが見つかりませんでした。")
-        return True
+        return True, False
 
     rt_msg = "（リツイート含む）" if include_retweets else "（リツイート除外）"
     print(f"🖼️  メディア数: {len(items)} 件 {rt_msg}")
@@ -190,7 +191,7 @@ def download_user(
     save_since_datetime(username, summary.watermark)
     if summary.watermark:
         print(f"📌 差分境界を保存: {summary.watermark}")
-    return True
+    return True, False
 
 
 def download_user_list(usernames: list[str], auth_token: str, ct0: str):
@@ -205,7 +206,7 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
         print("=" * 60)
         print(f"[{index}/{total}] @{username}")
 
-        success = download_user(
+        success, rate_limited = download_user(
             username,
             max_count=None,
             include_retweets=False,
@@ -219,6 +220,10 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
             succeeded += 1
         else:
             failed += 1
+        if index < total:
+            if rate_limited:
+                wait_after_rate_limit()
+            wait_between_users()
 
     print()
     print("=" * 60)
@@ -273,7 +278,7 @@ def main(argv: list[str] | None = None):
         download_user_list(usernames, auth_token, ct0)
         return
 
-    if not download_user(
+    success, _rate_limited = download_user(
         username,
         max_count=args.max_count,
         include_retweets=args.include_retweets,
@@ -282,5 +287,6 @@ def main(argv: list[str] | None = None):
         debug=args.debug,
         auth_token=auth_token,
         ct0=ct0,
-    ):
+    )
+    if not success:
         sys.exit(1)
