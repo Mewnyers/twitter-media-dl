@@ -211,9 +211,9 @@ Use `--update-all` when you want to scan the same set of user folders and downlo
 
 ## Rate Limits
 
-The script intentionally waits between API pages, between the initial `UserTweets` and `UserMedia` requests, between media downloads, and between users in batch/list processing.
+The script intentionally waits between API pages, between the initial `UserTweets` and `UserMedia` requests, between media downloads, and between users in batch/list processing. Full-fetch operations use a longer user interval than differential updates.
 
-If Twitter/X returns a rate limit error such as HTTP 429 after the underlying retry attempts, batch/list processing waits longer before moving to the next user. A rate limit error does not mark the user as unavailable.
+If Twitter/X returns a rate limit error such as HTTP 429 after the underlying retry attempts, batch/list processing stops without moving to the next user. A rate limit error does not mark the user as unavailable.
 
 ## Example Output
 
@@ -239,8 +239,9 @@ If Twitter/X returns a rate limit error such as HTTP 429 after the underlying re
 - Cookie-based authentication is used.
 - Pagination requests wait 3 seconds between pages.
 - The first full run waits 5 seconds between `UserTweets` and `UserMedia`.
-- Batch/list processing waits 60 seconds between users.
-- Batch/list processing waits 15 minutes after a rate limit error before moving to the next user.
+- User-list processing and `--scan-downloads`, which can perform full-history fetches, wait 60 seconds between users.
+- `--update-all` waits 5 seconds between users when using a saved differential boundary. It waits 60 seconds when `--full` is specified or no boundary exists and a full-history fetch is required.
+- Batch/list processing stops when a rate limit error is detected.
 - Media downloads wait 0.5 seconds between files.
 - HTTPS media downloads use `certifi`'s CA bundle when available.
 - If the script stops working due to Twitter/X API changes, try updating with `pip install --upgrade twitter-cli`.

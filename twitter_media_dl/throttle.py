@@ -1,6 +1,6 @@
 import time
 
-from .settings import ENDPOINT_DELAY, RATE_LIMIT_COOLDOWN, USER_DELAY
+from .settings import ENDPOINT_DELAY, UPDATE_ALL_USER_DELAY, USER_DELAY
 
 
 def is_rate_limited(error: Exception | str) -> bool:
@@ -23,10 +23,10 @@ def wait_between_endpoints():
 
 
 def wait_between_users():
-    """複数ユーザー処理で次のユーザーへ進む前に待つ。"""
+    """全件取得を伴う複数ユーザー処理で次のユーザーへ進む前に待つ。"""
     wait_seconds(USER_DELAY, "次のユーザー処理まで")
 
 
-def wait_after_rate_limit():
-    """429検出後、短い自動リトライ直後に再連打しないため長めに待つ。"""
-    wait_seconds(RATE_LIMIT_COOLDOWN, "rate limit 検出後")
+def wait_between_update_all_users():
+    """差分一括更新で次のユーザーへ進む前に短く待つ。"""
+    wait_seconds(UPDATE_ALL_USER_DELAY, "次のユーザー更新まで")

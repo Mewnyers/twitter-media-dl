@@ -16,7 +16,7 @@ from .storage import (
     prepare_output_dir,
     save_since_datetime,
 )
-from .throttle import is_rate_limited, wait_after_rate_limit, wait_between_users
+from .throttle import is_rate_limited, wait_between_users
 
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
@@ -198,6 +198,7 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
     total = len(usernames)
     succeeded = 0
     failed = 0
+    stopped = False
 
     print(f"ユーザー一覧処理対象: {total} ユーザー")
 
@@ -220,14 +221,17 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
             succeeded += 1
         else:
             failed += 1
+        if rate_limited:
+            print("[ERROR] rate limitを検出したため一覧処理を停止します。時間を置いて再実行してください。")
+            stopped = True
+            break
         if index < total:
-            if rate_limited:
-                wait_after_rate_limit()
             wait_between_users()
 
     print()
     print("=" * 60)
-    print(f"一覧処理完了: {succeeded} 件成功 / {failed} 件失敗")
+    result = "中断" if stopped else "完了"
+    print(f"一覧処理{result}: {succeeded} 件成功 / {failed} 件失敗")
 
 
 def main(argv: list[str] | None = None):

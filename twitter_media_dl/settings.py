@@ -13,8 +13,8 @@ TIMEZONE_OFFSET_HOURS = 9  # 0=UTC, 9=JST
 BATCH_SIZE = 40  # 1リクエストあたりの取得件数
 REQUEST_DELAY = 3.0  # APIページネーション間のウェイト（秒）
 ENDPOINT_DELAY = 5.0  # 初回取得で UserTweets と UserMedia を連続実行する間のウェイト（秒）
-USER_DELAY = 60.0  # 複数ユーザー処理でユーザー間に挟むウェイト（秒）
-RATE_LIMIT_COOLDOWN = 15 * 60.0  # 429検出後に次のユーザーへ進む前のウェイト（秒）
+USER_DELAY = 60.0  # 全件取得を伴う複数ユーザー処理のユーザー間ウェイト（秒）
+UPDATE_ALL_USER_DELAY = 5.0  # 差分一括更新のユーザー間ウェイト（秒）
 
 # Windowsで使えないファイル名文字
 INVALID_CHARS_RE = re.compile(r'[\\/:*?"<>|\r\n\t]')

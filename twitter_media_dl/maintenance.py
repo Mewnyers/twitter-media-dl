@@ -16,7 +16,7 @@ from .storage import (
     save_since_datetime,
     save_unavailable_state,
 )
-from .throttle import is_rate_limited, wait_after_rate_limit, wait_between_users
+from .throttle import is_rate_limited, wait_between_update_all_users, wait_between_users
 
 
 @dataclass
@@ -125,7 +125,6 @@ def scan_downloads(
     print(f"一括スキャン対象: {len(users)} ユーザー")
 
     for index, (username, folders) in enumerate(users.items(), start=1):
-        rate_limited = False
         print()
         print("=" * 60)
         print(f"[{index}/{len(users)}] @{username}")
@@ -142,9 +141,9 @@ def scan_downloads(
         try:
             tweets, _ = fetch_tweets(username, None, auth_token, ct0, None)
         except TwitterFetchError as e:
-            rate_limited = is_rate_limited(e)
-            if rate_limited:
-                print(f"[ERROR] rate limit のため取得を中断しました: {e}")
+            if is_rate_limited(e):
+                print(f"[ERROR] rate limitを検出したため一括スキャンを停止します: {e}")
+                break
             elif _is_unavailable_user_error(e):
                 _save_unavailable(username, e, folders, DOWNLOADS_DIR)
             else:
@@ -161,8 +160,6 @@ def scan_downloads(
                     print(f"差分境界を保存: {summary.watermark}")
 
         if index < len(users):
-            if rate_limited:
-                wait_after_rate_limit()
             wait_between_users()
 
 
@@ -184,7 +181,6 @@ def update_all_downloads(
     print(f"一括更新対象: {len(users)} ユーザー")
 
     for index, (username, folders) in enumerate(users.items(), start=1):
-        rate_limited = False
         print()
         print("=" * 60)
         print(f"[{index}/{len(users)}] @{username}")
@@ -214,9 +210,9 @@ def update_all_downloads(
         try:
             tweets, user = fetch_tweets(username, None, auth_token, ct0, since_dt)
         except TwitterFetchError as e:
-            rate_limited = is_rate_limited(e)
-            if rate_limited:
-                print(f"[ERROR] rate limit のため取得を中断しました: {e}")
+            if is_rate_limited(e):
+                print(f"[ERROR] rate limitを検出したため一括更新を停止します: {e}")
+                break
             elif _is_unavailable_user_error(e):
                 _save_unavailable(username, e, folders, DOWNLOADS_DIR)
             else:
@@ -241,6 +237,7 @@ def update_all_downloads(
                     print(f"差分境界を保存: {summary.watermark}")
 
         if index < len(users):
-            if rate_limited:
-                wait_after_rate_limit()
-            wait_between_users()
+            if since_dt is None:
+                wait_between_users()
+            else:
+                wait_between_update_all_users()
