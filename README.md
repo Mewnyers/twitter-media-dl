@@ -161,7 +161,7 @@ input UserID:
 
 Differential mode uses a per-user state file under `downloads/.state/`.
 
-The state file stores the newest timestamp that has been processed continuously without an earlier download failure. Later runs fetch media since that saved timestamp.
+The state file stores the latest processed timestamp and unresolved media in `pending_downloads`. Later runs fetch media since that timestamp and retry unresolved media, even when no new media is returned.
 
 Timestamps use this format:
 
@@ -169,7 +169,13 @@ Timestamps use this format:
 [YYYYMMDDhhmmss]
 ```
 
-If a media download fails, the differential boundary is only advanced up to the item before the first failure. This prevents a later successful download from hiding an older failed media item on the next run.
+If a media download fails, its tweet ID, media index, filename, URL, timestamp, error, attempt count and last attempt time are saved together with the differential boundary. A persistent failure does not force every later media item to be scanned again. Pending entries are removed only after a successful download or an existing-file check, never because an attempt limit was reached.
+
+State is saved after each failure and at the end of each user's processing, using a temporary file and atomic replacement. A state-write failure aborts that user's processing. An interrupted run can repeat work after its last checkpoint. Existing version 1 state files are accepted automatically. Deleting state also deletes its retry records and causes a full scan.
+
+Single-user, user-list and batch runs end with unresolved users and media, including filenames, tweet IDs, reasons and attempt counts. Unresolved errors produce a nonzero exit status. Rate limiting stops batch processing and reports how many users were not processed.
+
+Stored URLs may become invalid. A matching media item in a later API response refreshes its URL; use `--full` to refresh older entries. State files can contain media URLs and tweet-derived filenames and should remain private.
 
 Downloads are sorted oldest first. This prevents a partially interrupted run from saving the newest file first and causing the next run to treat older unfinished files as already covered by the differential boundary.
 
@@ -203,9 +209,9 @@ Duplicate usernames are processed only once, keeping the first occurrence. User-
 
 `--scan-downloads` scans user folders under `downloads/` whose folder name contains `(@username)`.
 
-It fetches the user's current tweet metadata, checks already-downloaded media files, renames files created with older filename rules, and writes per-user state files. It does not download missing media. If a media file is missing, the saved differential boundary stops before that gap so later runs do not skip it.
+It fetches the user's current tweet metadata, checks already-downloaded media files, renames files created with older filename rules, and writes per-user state files. It does not download missing media. Missing media are recorded in `pending_downloads` while the boundary advances, so the next update retries them without fetching the entire old range again. Missing media are reported as unresolved and produce a nonzero exit status.
 
-If a user cannot be fetched because the account was deleted, suspended, renamed, or is otherwise unavailable, the script records that user as `unavailable` under `downloads/.state/` and continues with the next user. Later batch runs skip users already recorded as `unavailable`. Use `--retry-unavailable` with `--scan-downloads` or `--update-all` to check them again.
+When a user fetch explicitly reports `user not found` or a suspended user, the script records that user as `unavailable` under `downloads/.state/` and continues with the next user. Other fetch errors are reported without marking the user permanently unavailable. Later batch runs skip users already recorded as `unavailable`. Use `--retry-unavailable` with `--scan-downloads` or `--update-all` to check them again.
 
 Use `--update-all` when you want to scan the same set of user folders and download missing or newer media as well. `--full` can be combined with `--update-all` to ignore existing differential boundaries for every user.
 

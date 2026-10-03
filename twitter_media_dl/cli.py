@@ -7,14 +7,14 @@ from pathlib import Path
 from .client import TwitterFetchError, fetch_tweets
 from .config import load_config
 from .debug import write_debug_data
-from .downloader import download_all
+from .downloader import download_user_media, UserResult, print_results
 from .maintenance import scan_downloads, update_all_downloads
 from .media import extract_media_items, sort_media_items_for_download
 from .storage import (
-    format_download_timestamp,
     load_since_datetime,
+    load_user_state,
+    StateSaveError,
     prepare_output_dir,
-    save_since_datetime,
 )
 from .throttle import is_rate_limited, wait_between_users
 
@@ -131,7 +131,7 @@ def load_user_list(path: str) -> list[str]:
     return usernames
 
 
-def download_user(
+def _download_user(
     username: str,
     *,
     max_count: int | None,
@@ -141,15 +141,15 @@ def download_user(
     debug: bool,
     auth_token: str,
     ct0: str,
-) -> tuple[bool, bool]:
-    """1ユーザー分の通常ダウンロード処理を行う。戻り値は (成功, rate limit 検出)。"""
+) -> UserResult:
+    """1ユーザー分の通常ダウンロード処理を行う。"""
     since_dt = None
     if not full:
         try:
             since_dt = load_since_datetime(username)
         except RuntimeError as e:
             print(f"❌ {e}")
-            return False, False
+            raise
         if since_dt:
             print(f"📅 差分モード: {since_dt.strftime('%Y/%m/%d %H:%M')} 以降を取得")
         else:
@@ -162,7 +162,7 @@ def download_user(
     except TwitterFetchError as e:
         print(f"❌ ツイート取得に失敗しました: {e}")
         print("   差分境界は更新しません。時間を置いて再実行してください。")
-        return False, is_rate_limited(e)
+        raise
 
     output_dir = prepare_output_dir(user, username)
 
@@ -173,25 +173,36 @@ def download_user(
     if debug:
         out_path = write_debug_data(tweets, username, anonymize=anonymize)
         print(f"📄 デバッグデータを出力しました: {out_path}")
-        return True, False
+        return UserResult(username)
 
     # メディア抽出
     items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
     if not items:
         print("ℹ️  ダウンロード対象のメディアが見つかりませんでした。")
-        return True, False
 
     rt_msg = "（リツイート含む）" if include_retweets else "（リツイート除外）"
     print(f"🖼️  メディア数: {len(items)} 件 {rt_msg}")
     print()
 
     # ダウンロード
-    initial_watermark = format_download_timestamp(since_dt) if since_dt else None
-    summary = download_all(items, output_dir, initial_watermark=initial_watermark, anonymize=anonymize)
-    save_since_datetime(username, summary.watermark)
+    summary = download_user_media(username, items, output_dir, anonymize=anonymize)
     if summary.watermark:
         print(f"📌 差分境界を保存: {summary.watermark}")
-    return True, False
+    return UserResult(username, pending=summary.pending, rate_limited=summary.rate_limited)
+
+
+def download_user(username, **kwargs):
+    try:
+        return _download_user(username, **kwargs)
+    except Exception as e:
+        result = UserResult(username, error=f"{type(e).__name__}: {e}", rate_limited=is_rate_limited(e))
+        try:
+            result.pending = (load_user_state(username) or {}).get('pending_downloads', {})
+        except RuntimeError as state_error:
+            result.error += f"; {state_error}"
+        if isinstance(e, StateSaveError):
+            result.pending = e.pending_downloads
+        return result
 
 
 def download_user_list(usernames: list[str], auth_token: str, ct0: str):
@@ -199,6 +210,7 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
     succeeded = 0
     failed = 0
     stopped = False
+    results = []
 
     print(f"ユーザー一覧処理対象: {total} ユーザー")
 
@@ -207,7 +219,7 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
         print("=" * 60)
         print(f"[{index}/{total}] @{username}")
 
-        success, rate_limited = download_user(
+        user_result = download_user(
             username,
             max_count=None,
             include_retweets=False,
@@ -217,11 +229,12 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
             auth_token=auth_token,
             ct0=ct0,
         )
-        if success:
+        results.append(user_result)
+        if user_result.success:
             succeeded += 1
         else:
             failed += 1
-        if rate_limited:
+        if user_result.rate_limited:
             print("[ERROR] rate limitを検出したため一覧処理を停止します。時間を置いて再実行してください。")
             stopped = True
             break
@@ -232,6 +245,8 @@ def download_user_list(usernames: list[str], auth_token: str, ct0: str):
     print("=" * 60)
     result = "中断" if stopped else "完了"
     print(f"一覧処理{result}: {succeeded} 件成功 / {failed} 件失敗")
+    print_results(results, total)
+    return not failed and not stopped
 
 
 def main(argv: list[str] | None = None):
@@ -259,16 +274,18 @@ def main(argv: list[str] | None = None):
     auth_token, ct0 = load_auth()
 
     if args.scan_downloads:
-        scan_downloads(
+        success = scan_downloads(
             auth_token,
             ct0,
             include_retweets=args.include_retweets,
             anonymize=args.anonymize,
             retry_unavailable=args.retry_unavailable,
         )
+        if not success:
+            sys.exit(1)
         return
     if args.update_all:
-        update_all_downloads(
+        success = update_all_downloads(
             auth_token,
             ct0,
             include_retweets=args.include_retweets,
@@ -276,13 +293,16 @@ def main(argv: list[str] | None = None):
             anonymize=args.anonymize,
             retry_unavailable=args.retry_unavailable,
         )
+        if not success:
+            sys.exit(1)
         return
 
     if usernames is not None:
-        download_user_list(usernames, auth_token, ct0)
+        if not download_user_list(usernames, auth_token, ct0):
+            sys.exit(1)
         return
 
-    success, _rate_limited = download_user(
+    result = download_user(
         username,
         max_count=args.max_count,
         include_retweets=args.include_retweets,
@@ -292,5 +312,6 @@ def main(argv: list[str] | None = None):
         auth_token=auth_token,
         ct0=ct0,
     )
-    if not success:
+    print_results([result], 1, args.anonymize)
+    if not result.success:
         sys.exit(1)

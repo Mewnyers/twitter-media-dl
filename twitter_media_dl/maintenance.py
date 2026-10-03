@@ -1,20 +1,14 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .client import TwitterFetchError, fetch_tweets
-from .downloader import download_all, get_item_watermark, rename_legacy_file
+from .downloader import download_user_media, get_item_watermark, rename_legacy_file, UserResult, print_results
+from .filename import anonymize_filename
 from .media import extract_media_items, sort_media_items_for_download
 from .settings import DOWNLOADS_DIR
 from .storage import (
-    find_downloaded_user_folders,
-    find_latest_downloaded_datetime,
-    format_download_timestamp,
-    is_unavailable_state,
-    load_since_datetime,
-    prepare_output_dir,
-    save_active_state,
-    save_since_datetime,
-    save_unavailable_state,
+    find_downloaded_user_folders, is_unavailable_state, load_since_datetime, load_user_state,
+    media_key, parse_download_timestamp, prepare_output_dir, save_active_state, save_unavailable_state, StateSaveError,
 )
 from .throttle import is_rate_limited, wait_between_update_all_users, wait_between_users
 
@@ -26,218 +20,147 @@ class ScanSummary:
     missing: int
     failed: int
     watermark: str | None
+    pending: dict = field(default_factory=dict)
 
 
-def scan_downloaded_items(
-    items: list[dict],
-    output_dirs: list[Path],
-    *,
-    initial_watermark: str | None = None,
-    anonymize: bool = False,
-) -> ScanSummary:
-    """既存ファイルを確認し、旧ファイル名があれば新ファイル名へリネームする。"""
-    from .filename import anonymize_filename
-
-    found = 0
-    renamed = 0
-    missing = 0
-    failed = 0
+def scan_downloaded_items(items: list[dict], output_dirs: list[Path], *,
+                          initial_watermark=None, anonymize=False, pending_downloads=None,
+                          checkpoint=None) -> ScanSummary:
+    """既存ファイルを確認し、旧ファイル名を移行して未保存項目を記録する。"""
+    pending = dict(pending_downloads or {})
+    merged = {key: dict(item) for key, item in pending.items()}
+    for item in items:
+        key = media_key(item)
+        merged[key] = {**merged.get(key, {}), **item}
+    items = sort_media_items_for_download(list(merged.values()))
+    for item in items:
+        if not parse_download_timestamp(item.get('created_at_sort', '')):
+            raise ValueError(f"メディア日時が不正です: {media_key(item)}")
+    found = renamed = missing = failed = 0
     watermark = initial_watermark
-    blocked_by_gap = False
-    total = len(items)
-
     for idx, item in enumerate(items, start=1):
-        filename = item["filename"]
+        filename = item['filename']
         display_name = anonymize_filename(filename) if anonymize else filename
-        prefix = f"[{idx}/{total}]"
-
+        prefix = f"[{idx}/{len(items)}]"
+        error = None
         try:
+            # 複数フォルダ内の旧ファイルも従来どおり移行する。
             renamed_in_any_dir = False
             for output_dir in output_dirs:
                 if rename_legacy_file(output_dir, item):
                     renamed_in_any_dir = True
-        except OSError as e:
-            print(f"{prefix} [WARN] 旧ファイル名のリネーム失敗: {e}")
+            if renamed_in_any_dir:
+                renamed += 1
+                print(f"{prefix} [RENAME] {display_name}")
+            elif any((directory / filename).is_file() for directory in output_dirs):
+                found += 1
+                print(f"{prefix} [OK] {display_name}")
+            else:
+                missing += 1
+                error = '未保存（スキャンのみ、ダウンロード未実行）'
+        except Exception as e:
             failed += 1
-            blocked_by_gap = True
-            continue
-
-        if renamed_in_any_dir:
-            print(f"{prefix} [RENAME] リネーム: {display_name}")
-            renamed += 1
-            if not blocked_by_gap:
-                watermark = get_item_watermark(item) or watermark
-            continue
-
-        if any((output_dir / filename).exists() for output_dir in output_dirs):
-            print(f"{prefix} [OK] 確認済み: {display_name}")
-            found += 1
-            if not blocked_by_gap:
-                watermark = get_item_watermark(item) or watermark
-            continue
-
-        print(f"{prefix} [MISSING] 未保存: {display_name}")
-        missing += 1
-        blocked_by_gap = True
-
-    print()
-    print("-" * 60)
+            error = f"{type(e).__name__}: {e}"
+        key = media_key(item)
+        watermark = max(watermark or '', get_item_watermark(item))
+        if error:
+            # スキャンではダウンロード試行回数を増やさない。
+            pending[key] = {**item, 'attempts': item.get('attempts', 0), 'last_error': error}
+            print(f"{prefix} [WARN] {display_name}: {error}")
+            if checkpoint:
+                checkpoint(watermark, pending)
+        else:
+            pending.pop(key, None)
+    if checkpoint:
+        checkpoint(watermark, pending)
     print(f"スキャン完了: {found} 件確認 / {renamed} 件リネーム / {missing} 件未保存 / {failed} 件失敗")
-    if missing or failed:
-        print("[WARN] 未保存または失敗があるため、差分境界はそこより先へ進めません。")
-
-    return ScanSummary(found=found, renamed=renamed, missing=missing, failed=failed, watermark=watermark)
-
-
-def _save_unavailable(username: str, error: Exception, folders: list[Path], downloads_dir: str):
-    legacy_dt, matched_folders = find_latest_downloaded_datetime(username, downloads_dir)
-    watermark = format_download_timestamp(legacy_dt) if legacy_dt else None
-    folder_names = matched_folders or [folder.name for folder in folders]
-    save_unavailable_state(username, str(error), watermark=watermark, folders=folder_names, downloads_dir=downloads_dir)
-    print(f"   取得不能として状態ファイルに記録しました: {error}")
+    return ScanSummary(found, renamed, missing, failed, watermark, pending)
 
 
 def _should_skip_unavailable(username: str, retry_unavailable: bool) -> bool:
-    if retry_unavailable:
-        return False
-    return is_unavailable_state(username, DOWNLOADS_DIR)
+    return not retry_unavailable and is_unavailable_state(username, DOWNLOADS_DIR)
 
 
 def _is_unavailable_user_error(error: Exception) -> bool:
-    """ユーザー自体が取得不能なエラーかを判定する。API一時失敗は含めない。"""
-    return "ユーザー取得失敗" in str(error)
+    """取得不能と断定できない通信・解析エラーは永続スキップしない。"""
+    message = str(error).lower()
+    return any(marker in message for marker in ('user not found', 'user has been suspended', 'user is suspended'))
 
 
-def scan_downloads(
-    auth_token: str,
-    ct0: str,
-    *,
-    include_retweets: bool = False,
-    anonymize: bool = False,
-    retry_unavailable: bool = False,
-):
-    """downloads 配下のユーザーを一括スキャンし、リネームと状態作成を行う。"""
+def _run_bulk(auth_token, ct0, *, scan, include_retweets, full=False, anonymize=False, retry_unavailable=False):
+    """一括処理の結果収集とエラー境界を共通化する。取得範囲と待機は維持する。"""
     users = find_downloaded_user_folders(DOWNLOADS_DIR)
     if not users:
-        print("downloads 配下にユーザーフォルダが見つかりませんでした。")
-        return
-
-    print(f"一括スキャン対象: {len(users)} ユーザー")
-
+        print('downloads 配下にユーザーフォルダが見つかりませんでした。')
+        return True
+    results = []
+    print(f"一括{'スキャン' if scan else '更新'}対象: {len(users)} ユーザー")
     for index, (username, folders) in enumerate(users.items(), start=1):
-        print()
-        print("=" * 60)
-        print(f"[{index}/{len(users)}] @{username}")
-        print(f"   対象フォルダ: {[folder.name for folder in folders]}")
-
-        try:
-            if _should_skip_unavailable(username, retry_unavailable):
-                print("   取得不能として記録済みのためスキップします。再確認する場合は --retry-unavailable を指定してください。")
-                continue
-        except RuntimeError as e:
-            print(f"[ERROR] {e}")
-            continue
-
-        try:
-            tweets, _ = fetch_tweets(username, None, auth_token, ct0, None)
-        except TwitterFetchError as e:
-            if is_rate_limited(e):
-                print(f"[ERROR] rate limitを検出したため一括スキャンを停止します: {e}")
-                break
-            elif _is_unavailable_user_error(e):
-                _save_unavailable(username, e, folders, DOWNLOADS_DIR)
-            else:
-                print(f"[ERROR] ツイート取得に失敗しました。状態ファイルは更新しません: {e}")
-        else:
-            items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
-            if not items:
-                save_active_state(username, folders=[folder.name for folder in folders])
-                print("メディア付きツイートが見つかりませんでした。")
-            else:
-                summary = scan_downloaded_items(items, folders, anonymize=anonymize)
-                save_active_state(username, summary.watermark, folders=[folder.name for folder in folders])
-                if summary.watermark:
-                    print(f"差分境界を保存: {summary.watermark}")
-
-        if index < len(users):
-            wait_between_users()
-
-
-def update_all_downloads(
-    auth_token: str,
-    ct0: str,
-    *,
-    include_retweets: bool = False,
-    full: bool = False,
-    anonymize: bool = False,
-    retry_unavailable: bool = False,
-):
-    """downloads 配下のユーザーを一括更新する。"""
-    users = find_downloaded_user_folders(DOWNLOADS_DIR)
-    if not users:
-        print("downloads 配下にユーザーフォルダが見つかりませんでした。")
-        return
-
-    print(f"一括更新対象: {len(users)} ユーザー")
-
-    for index, (username, folders) in enumerate(users.items(), start=1):
-        print()
-        print("=" * 60)
-        print(f"[{index}/{len(users)}] @{username}")
-
-        try:
-            if _should_skip_unavailable(username, retry_unavailable):
-                print("   取得不能として記録済みのためスキップします。再確認する場合は --retry-unavailable を指定してください。")
-                continue
-        except RuntimeError as e:
-            print(f"[ERROR] {e}")
-            continue
-
+        print(f"\n{'=' * 60}\n[{index}/{len(users)}] @{username}")
+        result = UserResult(username)
+        results.append(result)
         since_dt = None
-        if not full:
-            try:
-                since_dt = load_since_datetime(username)
-            except RuntimeError as e:
-                print(f"[ERROR] {e}")
-                continue
-            if since_dt:
-                print(f"差分モード: {since_dt.strftime('%Y/%m/%d %H:%M')} 以降を取得")
-            else:
-                print("全件モード: 状態ファイルがないため全件取得")
-        else:
-            print("全件モード: --full 指定")
-
+        requested = False
         try:
+            state = load_user_state(username, DOWNLOADS_DIR) or {}
+            result.pending = state.get('pending_downloads', {})
+            if _should_skip_unavailable(username, retry_unavailable):
+                result.skipped = True
+                print('取得不能として記録済みのためスキップします。再確認には --retry-unavailable を指定してください。')
+                continue
+            if not scan and not full:
+                since_dt = load_since_datetime(username, DOWNLOADS_DIR)
+            print(f"差分モード: {since_dt}" if since_dt else '全件モード')
+            requested = True
             tweets, user = fetch_tweets(username, None, auth_token, ct0, since_dt)
-        except TwitterFetchError as e:
-            if is_rate_limited(e):
-                print(f"[ERROR] rate limitを検出したため一括更新を停止します: {e}")
-                break
-            elif _is_unavailable_user_error(e):
-                _save_unavailable(username, e, folders, DOWNLOADS_DIR)
-            else:
-                print(f"[ERROR] ツイート取得に失敗しました。状態ファイルは更新しません: {e}")
-        else:
-            output_dir = prepare_output_dir(user, username)
-            print(f"保存先: {output_dir.resolve()}")
-            print(f"取得ツイート数: {len(tweets)} 件")
-
             items = sort_media_items_for_download(extract_media_items(tweets, include_retweets))
-            if not items:
-                print("ダウンロード対象のメディアが見つかりませんでした。")
+            if scan:
+                def checkpoint(watermark, pending):
+                    save_active_state(username, watermark, folders=[folder.name for folder in folders],
+                                      pending_downloads=pending, downloads_dir=DOWNLOADS_DIR)
+
+                summary = scan_downloaded_items(items, folders, initial_watermark=state.get('watermark'),
+                                               anonymize=anonymize, pending_downloads=result.pending,
+                                               checkpoint=checkpoint)
             else:
-                rt_msg = "（リツイート含む）" if include_retweets else "（リツイート除外）"
-                print(f"メディア数: {len(items)} 件 {rt_msg}")
-                print()
-
-                initial_watermark = format_download_timestamp(since_dt) if since_dt else None
-                summary = download_all(items, output_dir, initial_watermark=initial_watermark, anonymize=anonymize)
-                save_since_datetime(username, summary.watermark)
-                if summary.watermark:
-                    print(f"差分境界を保存: {summary.watermark}")
-
-        if index < len(users):
+                output_dir = prepare_output_dir(user, username, DOWNLOADS_DIR)
+                print(f"保存先: {output_dir.resolve()}\n取得ツイート数: {len(tweets)} 件")
+                summary = download_user_media(username, items, output_dir, anonymize=anonymize)
+                result.rate_limited = summary.rate_limited
+            result.pending = summary.pending
+        except Exception as e:
+            result.error = f"{type(e).__name__}: {e}"
+            result.rate_limited = is_rate_limited(e)
+            try:
+                if isinstance(e, TwitterFetchError) and not result.rate_limited and _is_unavailable_user_error(e):
+                    save_unavailable_state(username, str(e), folders=[folder.name for folder in folders],
+                                           downloads_dir=DOWNLOADS_DIR)
+                result.pending = (load_user_state(username, DOWNLOADS_DIR) or {}).get('pending_downloads', {})
+            except Exception as state_error:
+                result.error += f"; 状態処理: {state_error}"
+            if isinstance(e, StateSaveError):
+                result.pending = e.pending_downloads
+            print(f"[ERROR] {result.error}")
+        if result.rate_limited:
+            print('[ERROR] rate limitのため一括処理を停止します。')
+            break
+        if requested and index < len(users):
             if since_dt is None:
                 wait_between_users()
             else:
                 wait_between_update_all_users()
+    print_results(results, len(users), anonymize)
+    return len(results) == len(users) and all(r.success or (r.skipped and not r.pending) for r in results)
+
+
+def scan_downloads(auth_token, ct0, *, include_retweets=False, anonymize=False, retry_unavailable=False):
+    """downloads 配下を一括スキャンし、リネームと状態作成だけを行う。"""
+    return _run_bulk(auth_token, ct0, scan=True, include_retweets=include_retweets,
+                     anonymize=anonymize, retry_unavailable=retry_unavailable)
+
+
+def update_all_downloads(auth_token, ct0, *, include_retweets=False, full=False,
+                         anonymize=False, retry_unavailable=False):
+    """downloads 配下のユーザーを一括更新する。"""
+    return _run_bulk(auth_token, ct0, scan=False, include_retweets=include_retweets, full=full,
+                     anonymize=anonymize, retry_unavailable=retry_unavailable)

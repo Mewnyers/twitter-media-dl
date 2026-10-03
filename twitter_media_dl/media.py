@@ -70,7 +70,7 @@ def extract_media_items(tweets, include_retweets: bool) -> list[dict]:
 
 def sort_media_items_for_download(items: list[dict]) -> list[dict]:
     """
-    差分取得は保存済みファイルの最大日時を境界にするため、
+    チェックポイント以前の項目が未処理にならないよう、
     ダウンロードは古いメディアから順に進める。
     """
     filename_date_re = re.compile(r"\[(\d{14})\]")

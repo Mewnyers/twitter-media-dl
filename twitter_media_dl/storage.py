@@ -1,5 +1,7 @@
 import json
+import os
 import re
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -8,24 +10,27 @@ from .settings import DOWNLOADS_DIR, TIMEZONE_OFFSET_HOURS
 
 
 STATE_DIR_NAME = ".state"
-STATE_VERSION = 1
+STATE_VERSION = 2
 STATE_STATUS_ACTIVE = "active"
 STATE_STATUS_UNAVAILABLE = "unavailable"
 DOWNLOAD_USER_RE = re.compile(r"\(@([^)]+)\)")
+
+
+class StateSaveError(RuntimeError):
+    """保存できなかった未解決項目も最終レポートへ渡す。"""
+
+    def __init__(self, message, pending_downloads):
+        super().__init__(message)
+        self.pending_downloads = dict(pending_downloads)
 
 
 def parse_download_timestamp(timestamp: str):
     """ファイル名や状態ファイルの YYYYMMDDhhmmss を aware datetime に変換する。"""
     try:
         dt_naive = datetime.strptime(timestamp, "%Y%m%d%H%M%S")
-    except ValueError:
+    except (ValueError, TypeError):
         return None
     return dt_naive.replace(tzinfo=timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS)))
-
-
-def format_download_timestamp(dt: datetime) -> str:
-    """差分watermark保存用の YYYYMMDDhhmmss を返す。"""
-    return dt.astimezone(timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))).strftime("%Y%m%d%H%M%S")
 
 
 def get_state_path(username: str, downloads_dir: str = DOWNLOADS_DIR) -> Path:
@@ -40,16 +45,52 @@ def load_user_state(username: str, downloads_dir: str = DOWNLOADS_DIR):
         return None
 
     try:
-        return json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("version", 1) not in (1, 2):
+            raise ValueError("unsupported state format")
+        if state.get("watermark") and not parse_download_timestamp(state["watermark"]):
+            raise ValueError("invalid watermark")
+        pending = state.get("pending_downloads", {})
+        if not isinstance(pending, dict):
+            raise ValueError("invalid pending_downloads")
+        for key, item in pending.items():
+            if not isinstance(item, dict) or key != media_key(item):
+                raise ValueError("invalid pending media identity")
+            for name in [item.get("filename", ""), *item.get("legacy_filenames", [])]:
+                if not name or Path(name).name != name or name in (".", ".."):
+                    raise ValueError("invalid pending filename")
+            if not isinstance(item.get("url"), str) or not isinstance(item.get("attempts", 0), int):
+                raise ValueError("invalid pending media")
+            if not parse_download_timestamp(item.get("created_at_sort", "")):
+                raise ValueError("invalid pending timestamp")
+        return state
+    except (OSError, ValueError, TypeError, KeyError) as e:
         raise RuntimeError(f"状態ファイルを読み込めません: {state_path} ({e})") from e
 
 
 def write_user_state(username: str, state: dict, downloads_dir: str = DOWNLOADS_DIR):
-    """ユーザーごとの状態ファイルを書き込む。"""
+    """境界と未解決項目を一緒に置換し、書き込み途中の状態を公開しない。"""
     state_path = get_state_path(username, downloads_dir)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = None
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=state_path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(state, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, state_path)
+    except OSError as e:
+        raise StateSaveError(f"状態ファイルを保存できません: {state_path} ({e})",
+                             state.get('pending_downloads', {})) from e
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def media_key(item: dict) -> str:
+    """ファイル名変更に影響されないメディア識別子。"""
+    return f"{item['tweet_id']}:{item['media_index']}"
 
 
 def build_base_state(username: str, status: str):
@@ -67,14 +108,19 @@ def save_active_state(
     watermark: str | None = None,
     *,
     folders: list[str] | None = None,
+    pending_downloads: dict | None = None,
     downloads_dir: str = DOWNLOADS_DIR,
 ):
     """取得可能ユーザーの状態を保存する。"""
-    state = build_base_state(username, STATE_STATUS_ACTIVE)
+    state = load_user_state(username, downloads_dir) or {}
+    state.update(build_base_state(username, STATE_STATUS_ACTIVE))
+    state.pop("reason", None)
     if watermark:
         state["watermark"] = watermark
     if folders:
         state["folders"] = folders
+    if pending_downloads is not None:
+        state["pending_downloads"] = pending_downloads
     write_user_state(username, state, downloads_dir)
 
 
@@ -107,14 +153,6 @@ def load_since_datetime(username: str, downloads_dir: str = DOWNLOADS_DIR):
     return since_dt
 
 
-def save_since_datetime(username: str, watermark: str | None, downloads_dir: str = DOWNLOADS_DIR):
-    """連続して処理完了した最新日時を状態ファイルへ保存する。"""
-    if not watermark:
-        return
-
-    save_active_state(username, watermark, downloads_dir=downloads_dir)
-
-
 def save_unavailable_state(
     username: str,
     reason: str,
@@ -124,7 +162,8 @@ def save_unavailable_state(
     downloads_dir: str = DOWNLOADS_DIR,
 ):
     """取得不能ユーザーの状態を、既存ファイルを残したまま記録する。"""
-    state = build_base_state(username, STATE_STATUS_UNAVAILABLE)
+    state = load_user_state(username, downloads_dir) or {}
+    state.update(build_base_state(username, STATE_STATUS_UNAVAILABLE))
     state["reason"] = reason
     if watermark:
         state["watermark"] = watermark
